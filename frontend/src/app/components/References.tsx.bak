@@ -1,0 +1,499 @@
+import { useState } from "react";
+import { Pencil, Trash2, Plus, X } from "lucide-react";
+import { C } from "../tokens";
+import { useToast } from "./Toast";
+
+type TabId = "accounts" | "counterparties" | "articles" | "users";
+
+const TABS: { id: TabId; label: string }[] = [
+  { id: "accounts",       label: "Счета и кассы"   },
+  { id: "counterparties", label: "Контрагенты"      },
+  { id: "articles",       label: "Статьи движения"  },
+  { id: "users",          label: "Пользователи"     },
+];
+
+interface Account { id: number; name: string; currency: string; opening: number; current: number; }
+
+const INITIAL_ACCOUNTS: Account[] = [
+  { id: 1, name: "Расчётный счёт №1", currency: "RUB", opening: 500000, current: 980000 },
+  { id: 2, name: "Расчётный счёт №2", currency: "RUB", opening: 200000, current: 45000  },
+  { id: 3, name: "Касса",             currency: "RUB", opening: 50000,  current: 12500  },
+];
+
+const COUNTERPARTIES = [
+  { id: 1, name: "ООО Поставщик Альфа", inn: "7701234567",   type: "Юр. лицо", contact: "Смирнов А.П."  },
+  { id: 2, name: "ИП Смирнов А.В.",     inn: "772345678901", type: "ИП",        contact: "Смирнов А.В."  },
+  { id: 3, name: "АО ТехСервис",        inn: "7803456789",   type: "Юр. лицо", contact: "Козлова Е.А."  },
+  { id: 4, name: "ООО РентаГрупп",      inn: "7904567890",   type: "Юр. лицо", contact: "Петров И.С."   },
+  { id: 5, name: "ПАО Энергоресурс",    inn: "7705678901",   type: "Юр. лицо", contact: "Васильев К.Д." },
+];
+
+const ARTICLES = [
+  { id: 1, code: "01.01", name: "Аренда офиса",       type: "Расход", group: "Административные"     },
+  { id: 2, code: "01.02", name: "Заработная плата",    type: "Расход", group: "Оплата труда"          },
+  { id: 3, code: "01.03", name: "Расходные материалы", type: "Расход", group: "Административные"     },
+  { id: 4, code: "01.04", name: "Услуги подрядчиков",  type: "Расход", group: "Операционные"         },
+  { id: 5, code: "02.01", name: "Выручка от клиентов", type: "Доход",  group: "Основная деятельность"},
+];
+
+const USERS = [
+  { id: 1, name: "Иванова Мария С.",  login: "m.ivanova",  role: "Инициатор",   status: "active"   },
+  { id: 2, name: "Козлова Елена В.",  login: "e.kozlova",  role: "Согласующий", status: "active"   },
+  { id: 3, name: "Петров Иван А.",    login: "i.petrov",   role: "Казначей",    status: "active"   },
+  { id: 4, name: "Сидоров Андрей К.", login: "a.sidorov",  role: "Наблюдатель", status: "inactive" },
+];
+
+function ruFmt(n: number): string {
+  const s = Math.floor(Math.abs(n)).toString();
+  const parts: string[] = [];
+  for (let i = s.length; i > 0; i -= 3) parts.unshift(s.slice(Math.max(0, i - 3), i));
+  return parts.join(" ");
+}
+
+export function References() {
+  const [tab, setTab] = useState<TabId>("accounts");
+
+  return (
+    <div style={{ padding: 24, fontFamily: "Inter, sans-serif" }}>
+
+      <div style={{ marginBottom: 20 }}>
+        <h1 style={{ fontSize: 24, fontWeight: 700, color: C.textDk, margin: 0 }}>Справочники</h1>
+      </div>
+
+      {/* Tabs */}
+      <div style={{ display: "flex", gap: 4, marginBottom: 20 }}>
+        {TABS.map(({ id, label }) => {
+          const active = tab === id;
+          return (
+            <button
+              key={id}
+              onClick={() => setTab(id)}
+              style={{
+                padding: "8px 18px",
+                borderRadius: active ? "6px 6px 0 0" : 6,
+                border: "none",
+                background: active ? C.sage : C.ivory,
+                color: active ? C.surface : C.textLt,
+                fontSize: 13,
+                fontWeight: active ? 600 : 400,
+                cursor: "pointer",
+                fontFamily: "Inter, sans-serif",
+                transition: "background 0.15s, color 0.15s",
+              }}
+            >
+              {label}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Content */}
+      <div style={{ background: C.surface, border: `1px solid ${C.warm}`, borderRadius: 8, overflow: "hidden", boxShadow: "0 1px 3px rgba(44,44,30,0.08)" }}>
+        {tab === "accounts"       && <AccountsTab />}
+        {tab === "counterparties" && <CounterpartiesTab />}
+        {tab === "articles"       && <ArticlesTab />}
+        {tab === "users"          && <UsersTab />}
+      </div>
+    </div>
+  );
+}
+
+/* ── Счета и кассы ─────────────────────────────────── */
+function AccountsTab() {
+  const { showToast } = useToast();
+  const [accounts,   setAccounts]   = useState<Account[]>(INITIAL_ACCOUNTS);
+  const [editTarget, setEditTarget] = useState<Account | null>(null);
+  const [showModal,  setShowModal]  = useState(false);
+  const [delTarget,  setDelTarget]  = useState<Account | null>(null);
+
+  const openAdd  = () => { setEditTarget(null); setShowModal(true); };
+  const openEdit = (acc: Account) => { setEditTarget(acc); setShowModal(true); };
+  const openDel  = (acc: Account) => setDelTarget(acc);
+
+  const handleSave = (data: { name: string; currency: string; opening: number }) => {
+    if (editTarget) {
+      setAccounts(prev => prev.map(a => a.id === editTarget.id ? { ...a, ...data } : a));
+      showToast("Счёт успешно обновлён", "success");
+    } else {
+      const newAcc: Account = { id: Date.now(), ...data, current: data.opening };
+      setAccounts(prev => [...prev, newAcc]);
+      showToast("Счёт добавлен", "success");
+    }
+    setShowModal(false);
+  };
+
+  const handleDelete = () => {
+    if (!delTarget) return;
+    setAccounts(prev => prev.filter(a => a.id !== delTarget.id));
+    showToast(`Счёт «${delTarget.name}» удалён`, "error");
+    setDelTarget(null);
+  };
+
+  return (
+    <>
+      <TableToolbar>
+        <button
+          onClick={openAdd}
+          style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 16px", borderRadius: 6, background: C.sage, color: C.surface, border: "none", fontSize: 13, fontWeight: 500, cursor: "pointer", fontFamily: "Inter, sans-serif" }}
+        >
+          <Plus size={14} />
+          Добавить счёт
+        </button>
+      </TableToolbar>
+
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+        <thead>
+          <tr style={{ background: C.warm }}>
+            {["Название", "Валюта", "Нач. остаток", "Тек. остаток", "Статус", "Действия"].map(col => (
+              <Th key={col}>{col}</Th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {accounts.map((row, i) => (
+            <Tr key={row.id} i={i}>
+              <Td bold>{row.name}</Td>
+              <Td>{row.currency}</Td>
+              <Td mono>{ruFmt(row.opening)} ₽</Td>
+              <Td mono color={row.current < 50000 ? C.danger : C.textDk}>{ruFmt(row.current)} ₽</Td>
+              <Td><ActiveBadge /></Td>
+              <Td>
+                <div style={{ display: "flex", gap: 6 }}>
+                  <IconBtn title="Редактировать" hoverColor={C.sage} onClick={() => openEdit(row)}>
+                    <Pencil size={14} />
+                  </IconBtn>
+                  <IconBtn title="Удалить" hoverColor={C.danger} onClick={() => openDel(row)}>
+                    <Trash2 size={14} />
+                  </IconBtn>
+                </div>
+              </Td>
+            </Tr>
+          ))}
+        </tbody>
+      </table>
+
+      {/* Account modal */}
+      {showModal && (
+        <AccountModal
+          initial={editTarget}
+          onSave={handleSave}
+          onClose={() => setShowModal(false)}
+        />
+      )}
+
+      {/* Delete confirmation */}
+      {delTarget && (
+        <ConfirmDialog
+          title="Удалить счёт?"
+          message={`Счёт «${delTarget.name}» будет удалён без возможности восстановления.`}
+          confirmLabel="Удалить"
+          confirmColor={C.danger}
+          onConfirm={handleDelete}
+          onCancel={() => setDelTarget(null)}
+        />
+      )}
+    </>
+  );
+}
+
+/* ── Account modal ─────────────────────────────────── */
+interface AccountModalProps {
+  initial: Account | null;
+  onSave:  (data: { name: string; currency: string; opening: number }) => void;
+  onClose: () => void;
+}
+
+function AccountModal({ initial, onSave, onClose }: AccountModalProps) {
+  const [name,     setName]     = useState(initial?.name     ?? "");
+  const [currency, setCurrency] = useState(initial?.currency ?? "RUB");
+  const [opening,  setOpening]  = useState(initial ? String(initial.opening) : "");
+  const [focused,  setFocused]  = useState<string | null>(null);
+
+  const focusStyle = (f: string): React.CSSProperties =>
+    focused === f
+      ? { border: `1.5px solid ${C.sage}`, boxShadow: `0 0 0 3px ${C.sage20}` }
+      : { border: `1px solid ${C.warm}` };
+
+  const base: React.CSSProperties = {
+    width: "100%",
+    padding: "9px 12px",
+    borderRadius: 6,
+    background: C.surface,
+    fontSize: 14,
+    color: C.textDk,
+    outline: "none",
+    fontFamily: "Inter, sans-serif",
+    boxSizing: "border-box",
+    transition: "border 0.15s, box-shadow 0.15s",
+  };
+
+  const handleSubmit = () => {
+    const n = parseFloat(opening.replace(/\s/g, "").replace(",", ".")) || 0;
+    onSave({ name: name.trim(), currency, opening: n });
+  };
+
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: C.overlay, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, fontFamily: "Inter, sans-serif" }}>
+      <div onClick={e => e.stopPropagation()} style={{ width: 480, background: C.surface, border: `1px solid ${C.warm}`, borderRadius: 12, boxShadow: "0 4px 24px rgba(44,44,30,0.18)", display: "flex", flexDirection: "column" }}>
+
+        {/* Header */}
+        <div style={{ padding: "20px 24px 16px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <h2 style={{ fontSize: 18, fontWeight: 600, color: C.textDk, margin: 0 }}>
+            {initial ? "Редактировать счёт" : "Добавить счёт"}
+          </h2>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: C.textLt, display: "flex", padding: 4, borderRadius: 4 }}>
+            <X size={18} />
+          </button>
+        </div>
+
+        <div style={{ height: 1, background: C.warm }} />
+
+        {/* Form */}
+        <div style={{ padding: "20px 24px", display: "flex", flexDirection: "column", gap: 16 }}>
+          {/* Название */}
+          <div>
+            <FieldLabel>Название</FieldLabel>
+            <input value={name} onChange={e => setName(e.target.value)}
+              placeholder="Расчётный счёт №1"
+              onFocus={() => setFocused("name")} onBlur={() => setFocused(null)}
+              style={{ ...base, ...focusStyle("name") }} />
+          </div>
+
+          {/* Валюта */}
+          <div>
+            <FieldLabel>Валюта</FieldLabel>
+            <div style={{ display: "flex", gap: 8 }}>
+              {["RUB", "USD", "EUR"].map(cur => (
+                <button
+                  key={cur}
+                  onClick={() => setCurrency(cur)}
+                  style={{
+                    flex: 1,
+                    padding: "9px 0",
+                    borderRadius: 6,
+                    border: currency === cur ? `2px solid ${C.sage}` : `1px solid ${C.warm}`,
+                    background: currency === cur ? C.sage10 : C.surface,
+                    color: currency === cur ? C.sage : C.textLt,
+                    fontSize: 13,
+                    fontWeight: currency === cur ? 600 : 400,
+                    cursor: "pointer",
+                    fontFamily: "Inter, sans-serif",
+                    transition: "all 0.15s",
+                  }}
+                >
+                  {cur}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Начальный остаток */}
+          <div>
+            <FieldLabel>Начальный остаток</FieldLabel>
+            <div style={{ position: "relative" }}>
+              <input value={opening} onChange={e => setOpening(e.target.value)}
+                placeholder="0"
+                onFocus={() => setFocused("opening")} onBlur={() => setFocused(null)}
+                style={{ ...base, ...focusStyle("opening"), paddingRight: 36 }} />
+              <span style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", fontSize: 14, color: C.textLt, pointerEvents: "none" }}>₽</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div style={{ borderTop: `1px solid ${C.warm}`, padding: "14px 24px", display: "flex", gap: 10 }}>
+          <button
+            onClick={handleSubmit}
+            disabled={!name.trim()}
+            style={{ padding: "9px 20px", borderRadius: 6, background: name.trim() ? C.sage : C.warm, color: C.surface, border: "none", fontSize: 14, fontWeight: 500, cursor: name.trim() ? "pointer" : "not-allowed", fontFamily: "Inter, sans-serif" }}
+          >
+            Сохранить
+          </button>
+          <button onClick={onClose} style={{ padding: "9px 12px", borderRadius: 6, background: "transparent", color: C.olive, border: "none", fontSize: 14, fontWeight: 500, cursor: "pointer", fontFamily: "Inter, sans-serif", marginLeft: "auto" }}>
+            Отмена
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── Confirmation dialog ────────────────────────────── */
+function ConfirmDialog({
+  title, message, confirmLabel, confirmColor, onConfirm, onCancel,
+}: {
+  title: string; message: string; confirmLabel: string; confirmColor: string;
+  onConfirm: () => void; onCancel: () => void;
+}) {
+  return (
+    <div onClick={onCancel} style={{ position: "fixed", inset: 0, background: C.overlay, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, fontFamily: "Inter, sans-serif" }}>
+      <div onClick={e => e.stopPropagation()} style={{ width: 400, background: C.surface, border: `1px solid ${C.warm}`, borderRadius: 12, boxShadow: "0 4px 24px rgba(44,44,30,0.18)", padding: "28px 28px 20px" }}>
+        <h3 style={{ fontSize: 16, fontWeight: 700, color: C.textDk, margin: "0 0 10px" }}>{title}</h3>
+        <p style={{ fontSize: 14, color: C.textLt, margin: "0 0 24px", lineHeight: 1.5 }}>{message}</p>
+        <div style={{ display: "flex", gap: 10 }}>
+          <button
+            onClick={onConfirm}
+            style={{ padding: "9px 20px", borderRadius: 6, background: confirmColor, color: C.surface, border: "none", fontSize: 14, fontWeight: 500, cursor: "pointer", fontFamily: "Inter, sans-serif" }}
+          >
+            {confirmLabel}
+          </button>
+          <button onClick={onCancel} style={{ padding: "9px 12px", borderRadius: 6, background: "transparent", color: C.olive, border: "none", fontSize: 14, fontWeight: 500, cursor: "pointer", fontFamily: "Inter, sans-serif" }}>
+            Отмена
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── Other tabs (read-only) ────────────────────────── */
+function CounterpartiesTab() {
+  return (
+    <>
+      <TableToolbar>
+        <AddBtn label="Добавить контрагента" />
+      </TableToolbar>
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+        <thead><tr style={{ background: C.warm }}>{["Наименование", "ИНН", "Тип", "Контакт", "Действия"].map(c => <Th key={c}>{c}</Th>)}</tr></thead>
+        <tbody>
+          {COUNTERPARTIES.map((row, i) => (
+            <Tr key={row.id} i={i}>
+              <Td bold>{row.name}</Td>
+              <Td mono>{row.inn}</Td>
+              <Td>{row.type}</Td>
+              <Td>{row.contact}</Td>
+              <Td><ReadOnlyActions /></Td>
+            </Tr>
+          ))}
+        </tbody>
+      </table>
+    </>
+  );
+}
+
+function ArticlesTab() {
+  return (
+    <>
+      <TableToolbar>
+        <AddBtn label="Добавить статью" />
+      </TableToolbar>
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+        <thead><tr style={{ background: C.warm }}>{["Код", "Наименование", "Тип", "Группа", "Действия"].map(c => <Th key={c}>{c}</Th>)}</tr></thead>
+        <tbody>
+          {ARTICLES.map((row, i) => (
+            <Tr key={row.id} i={i}>
+              <Td mono>{row.code}</Td>
+              <Td bold>{row.name}</Td>
+              <Td>
+                <span style={{ display: "inline-flex", padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 500, background: row.type === "Доход" ? C.sage20 : C.danger15, color: row.type === "Доход" ? "#3D6B3D" : "#8B2020" }}>
+                  {row.type}
+                </span>
+              </Td>
+              <Td color={C.textLt}>{row.group}</Td>
+              <Td><ReadOnlyActions /></Td>
+            </Tr>
+          ))}
+        </tbody>
+      </table>
+    </>
+  );
+}
+
+function UsersTab() {
+  return (
+    <>
+      <TableToolbar>
+        <AddBtn label="Добавить пользователя" />
+      </TableToolbar>
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+        <thead><tr style={{ background: C.warm }}>{["ФИО", "Логин", "Роль", "Статус", "Действия"].map(c => <Th key={c}>{c}</Th>)}</tr></thead>
+        <tbody>
+          {USERS.map((row, i) => (
+            <Tr key={row.id} i={i}>
+              <Td bold>{row.name}</Td>
+              <Td mono color={C.textLt}>{row.login}</Td>
+              <Td>
+                <span style={{ display: "inline-flex", padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 500, background: C.olive20, color: "#555540" }}>
+                  {row.role}
+                </span>
+              </Td>
+              <Td>{row.status === "active" ? <ActiveBadge /> : <InactiveBadge />}</Td>
+              <Td><ReadOnlyActions /></Td>
+            </Tr>
+          ))}
+        </tbody>
+      </table>
+    </>
+  );
+}
+
+/* ── Shared primitives ─────────────────────────────── */
+function TableToolbar({ children }: { children: React.ReactNode }) {
+  return (
+    <div style={{ padding: "12px 16px", borderBottom: `1px solid ${C.warm}`, display: "flex", justifyContent: "flex-end" }}>
+      {children}
+    </div>
+  );
+}
+
+function AddBtn({ label }: { label: string }) {
+  return (
+    <button style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 16px", borderRadius: 6, background: C.sage, color: C.surface, border: "none", fontSize: 13, fontWeight: 500, cursor: "pointer", fontFamily: "Inter, sans-serif" }}>
+      <Plus size={14} />
+      {label}
+    </button>
+  );
+}
+
+function Th({ children }: { children: React.ReactNode }) {
+  return <th style={{ padding: "10px 14px", textAlign: "left", fontWeight: 600, color: C.textDk, fontSize: 12, whiteSpace: "nowrap" }}>{children}</th>;
+}
+
+function Tr({ children, i }: { children: React.ReactNode; i: number }) {
+  const [hov, setHov] = useState(false);
+  return (
+    <tr onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}
+      style={{ background: hov ? C.beige30 : i % 2 === 0 ? C.surface : C.ivory50, transition: "background 0.1s", borderBottom: `1px solid ${C.ivory}` }}>
+      {children}
+    </tr>
+  );
+}
+
+function Td({ children, bold, mono, color }: { children?: React.ReactNode; bold?: boolean; mono?: boolean; color?: string }) {
+  return <td style={{ padding: "11px 14px", color: color ?? C.textDk, fontWeight: bold ? 600 : 400, fontVariantNumeric: mono ? "tabular-nums" : undefined, whiteSpace: "nowrap" }}>{children}</td>;
+}
+
+function ActiveBadge() {
+  return <span style={{ display: "inline-flex", padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 500, background: C.sage, color: C.surface }}>Активен</span>;
+}
+
+function InactiveBadge() {
+  return <span style={{ display: "inline-flex", padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 500, background: C.ivory, color: C.textLt }}>Неактивен</span>;
+}
+
+function FieldLabel({ children }: { children: React.ReactNode }) {
+  return <label style={{ fontSize: 12, fontWeight: 500, color: C.textLt, display: "block", marginBottom: 6 }}>{children}</label>;
+}
+
+function IconBtn({ children, title, hoverColor, onClick }: { children: React.ReactNode; title: string; hoverColor: string; onClick: () => void }) {
+  const [hov, setHov] = useState(false);
+  return (
+    <button title={title} onClick={onClick} onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}
+      style={{ background: "none", border: "none", cursor: "pointer", color: hov ? hoverColor : C.olive, padding: 2, display: "flex", borderRadius: 4, transition: "color 0.15s" }}>
+      {children}
+    </button>
+  );
+}
+
+function ReadOnlyActions() {
+  return (
+    <div style={{ display: "flex", gap: 6 }}>
+      <IconBtn title="Редактировать" hoverColor={C.sage} onClick={() => {}}>
+        <Pencil size={14} />
+      </IconBtn>
+      <IconBtn title="Удалить" hoverColor={C.danger} onClick={() => {}}>
+        <Trash2 size={14} />
+      </IconBtn>
+    </div>
+  );
+}

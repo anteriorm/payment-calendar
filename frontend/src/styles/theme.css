@@ -1,0 +1,403 @@
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --tm-weekend: #AAAAAC;   /* выходные дни: нейтральный серый */
+  --font-size: 16px;
+  --background: #ffffff;
+  --foreground: oklch(0.145 0 0);
+  --card: #ffffff;
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: #7C3AED;
+  --primary-foreground: #FFFFFF;
+  --secondary: #EDE9FE;
+  --secondary-foreground: #1E1B4B;
+  --muted: #F5F3FF;
+  --muted-foreground: #6B7280;
+  --accent: #DDD6FE;
+  --accent-foreground: #1E1B4B;
+  --destructive: #E11D48;
+  --destructive-foreground: #FFFFFF;
+  --border: rgba(124, 58, 237, 0.15);
+  --input: transparent;
+  --input-background: #FAFAFE;
+  --switch-background: #C4B5FD;
+  --font-weight-medium: 500;
+  --font-weight-normal: 400;
+  --ring: #7C3AED;
+  --chart-1: oklch(0.646 0.222 41.116);
+  --chart-2: oklch(0.6 0.118 184.704);
+  --chart-3: oklch(0.398 0.07 227.392);
+  --chart-4: oklch(0.828 0.189 84.429);
+  --chart-5: oklch(0.769 0.188 70.08);
+  --radius: 0.625rem;
+  --sidebar: oklch(0.985 0 0);
+  --sidebar-foreground: oklch(0.145 0 0);
+  --sidebar-primary: #030213;
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.97 0 0);
+  --sidebar-accent-foreground: oklch(0.205 0 0);
+  --sidebar-border: oklch(0.922 0 0);
+  --sidebar-ring: oklch(0.708 0 0);
+}
+
+.dark {
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.145 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.145 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: #A78BFA;
+  --primary-foreground: #1E1B4B;
+  --secondary: #2E1065;
+  --secondary-foreground: #EDE9FE;
+  --muted: #1E1B4B;
+  --muted-foreground: #A78BFA;
+  --accent: #4C1D95;
+  --accent-foreground: #EDE9FE;
+  --destructive: #FB7185;
+  --destructive-foreground: #1E1B4B;
+  --border: rgba(167, 139, 250, 0.2);
+  --input: rgba(167, 139, 250, 0.1);
+  --ring: #A78BFA;
+  --font-weight-medium: 500;
+  --font-weight-normal: 400;
+  --chart-1: oklch(0.488 0.243 264.376);
+  --chart-2: oklch(0.696 0.17 162.48);
+  --chart-3: oklch(0.769 0.188 70.08);
+  --chart-4: oklch(0.627 0.265 303.9);
+  --chart-5: oklch(0.645 0.246 16.439);
+  --sidebar: oklch(0.205 0 0);
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-primary: oklch(0.488 0.243 264.376);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.269 0 0);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(0.269 0 0);
+  --sidebar-ring: oklch(0.439 0 0);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-input-background: var(--input-background);
+  --color-switch-background: var(--switch-background);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+}
+
+/* ════════════════════════════════════════════════════
+   TrueMachine palette tokens — Theme A: Sage (default)
+   ════════════════════════════════════════════════════ */
+:root {
+  --tm-weekend: #AAAAAC;   /* выходные дни: нейтральный серый */
+  --tm-sage:    #80A080;
+  --tm-olive:   #A0A080;
+  --tm-beige:   #E0C0A0;
+  --tm-ivory:   #FAFAF5;   /* фон страниц = белый */
+  --tm-warm:    #1E1E1E;   /* границы = чёрный */
+  --tm-hdr:     #EEEEEE;   /* фон шапок таблиц */
+  --tm-danger:  #C0504A;
+  --tm-textDk:  #2C2C1E;
+  --tm-textLt:  #6B6B55;
+  --tm-surface: #FFFFFF;   /* карточки = чистый белый */
+  --tm-sageHov: #6B8F6B;
+  --tm-sageAct: #5A7A5A;
+
+  --tm-sage10:   rgba(128,160,128,0.10);
+  --tm-sage20:   rgba(128,160,128,0.20);
+  --tm-beige30:  rgba(224,192,160,0.30);
+  --tm-beige40:  rgba(224,192,160,0.40);
+  --tm-danger08: rgba(192,80,74,0.08);
+  --tm-danger12: rgba(192,80,74,0.12);
+  --tm-danger15: rgba(192,80,74,0.15);
+  --tm-olive20:  rgba(160,160,128,0.20);
+  --tm-ivory50:  rgba(224,224,192,0.50);
+  --tm-warm80:   rgba(192,192,152,0.80);
+  --tm-overlay:  rgba(44,44,30,0.45);
+
+  /* Шапки таблиц и строки «Итого» */
+  --tm-selected: rgba(128,160,128,0.18);    /* светло-шалфейный (меняется с темой) */
+
+  --tm-badge-draft-bg:         #E0E0C0;  --tm-badge-draft-color:         #6B6B55;
+  --tm-badge-pending-bg:       #E0C0A0;  --tm-badge-pending-color:       #7A5A30;
+  --tm-badge-approved-bg:      rgba(128,160,128,0.20); --tm-badge-approved-color:    #3D6B3D;
+  --tm-badge-registry-bg:      rgba(160,160,128,0.20); --tm-badge-registry-color:    #555540;
+  --tm-badge-paid-bg:          #80A080;  --tm-badge-paid-color:          #FAFAF5;
+  --tm-badge-rejected-bg:      rgba(192,80,74,0.15);   --tm-badge-rejected-color:    #8B2020;
+  --tm-badge-planned-bg:       #E0E0C0;  --tm-badge-planned-color:       #6B6B55;
+  --tm-badge-confirmed-bg:     rgba(128,160,128,0.20); --tm-badge-confirmed-color:   #3D6B3D;
+  --tm-badge-received-bg:      #80A080;  --tm-badge-received-color:      #FAFAF5;
+
+  /* Toast warning — тёплый янтарь, работает в светлой палитре */
+  --tm-toast-warn:        #D49A30;
+  --tm-toast-warn-text:   #FAFAF5;
+  --tm-toast-warn-border: #B07820;
+}
+
+/* ═══════════════════════════════════════════════════
+   TrueMachine palette tokens — Theme B: Mauve / Teal
+   Colors: #897E82  #D1321F  #334743  #91AD8D  #E6E7C2
+   ═══════════════════════════════════════════════════ */
+.theme-mauve {
+  --tm-weekend: #7A9090;   /* выходные: приглушённый тил */
+  --tm-sage:    #91AD8D;
+  --tm-olive:   #334743;
+  --tm-beige:   #C8BCBE;
+  --tm-ivory:   #F9F9F5;
+  --tm-warm:    #1E1E1E;
+  --tm-danger:  #D1321F;
+  --tm-textDk:  #1E2D2A;
+  --tm-textLt:  #5A6B68;
+  --tm-surface: #FFFFFF;
+  --tm-sageHov: #7A9B7A;
+  --tm-sageAct: #6A8A6A;
+
+  --tm-sage10:   rgba(145,173,141,0.10);
+  --tm-sage20:   rgba(145,173,141,0.20);
+  --tm-beige30:  rgba(137,126,130,0.30);
+  --tm-beige40:  rgba(137,126,130,0.40);
+  --tm-danger08: rgba(209,50,31,0.08);
+  --tm-danger12: rgba(209,50,31,0.12);
+  --tm-danger15: rgba(209,50,31,0.15);
+  --tm-olive20:  rgba(51,71,67,0.20);
+  --tm-ivory50:  rgba(230,231,194,0.50);
+  --tm-warm80:   rgba(140,158,155,0.80);
+  --tm-overlay:  rgba(30,45,42,0.45);
+  --tm-hdr:      #E8EFEE;                   /* шапки таблиц: светлый тил */
+  --tm-selected: rgba(145,173,141,0.18);    /* светло-моув */
+
+  --tm-badge-draft-bg:         #E6E7C2;  --tm-badge-draft-color:         #5A6B68;
+  --tm-badge-pending-bg:       #DFC8BE;  --tm-badge-pending-color:       #7A3828;
+  --tm-badge-approved-bg:      rgba(145,173,141,0.20); --tm-badge-approved-color:    #2D5B38;
+  --tm-badge-registry-bg:      rgba(51,71,67,0.20);    --tm-badge-registry-color:    #2B4540;
+  --tm-badge-paid-bg:          #91AD8D;  --tm-badge-paid-color:          #FAF9F8;
+  --tm-badge-rejected-bg:      rgba(209,50,31,0.15);   --tm-badge-rejected-color:    #8B1010;
+  --tm-badge-planned-bg:       #E6E7C2;  --tm-badge-planned-color:       #5A6B68;
+  --tm-badge-confirmed-bg:     rgba(145,173,141,0.20); --tm-badge-confirmed-color:   #2D5B38;
+  --tm-badge-received-bg:      #91AD8D;  --tm-badge-received-color:      #FAF9F8;
+
+  --tm-toast-warn:        #C8922A;
+  --tm-toast-warn-text:   #FAF9F8;
+  --tm-toast-warn-border: #A07020;
+}
+
+/* ═══════════════════════════════════════════════════════
+   TrueMachine palette tokens — Theme C: Коралл / Серый
+   Colors: #F6F6F5  #C5AA96  #A6A3A3  #E98569  #6E6D6D
+   ═══════════════════════════════════════════════════════ */
+.theme-coral {
+  --tm-weekend: #B0A090;   /* выходные: тёплый беж */
+  --tm-sage:    #E98569;   /* коралл — основной акцент, кнопки */
+  --tm-olive:   #C5AA96;   /* тёплый беж — сайдбар, вторичные действия */
+  --tm-beige:   #C5AA96;   /* беж — hover, предупреждения */
+  --tm-ivory:   #F6F6F5;   /* светло-серый — фон страниц */
+  --tm-warm:    #A6A3A3;   /* средний серый — рамки, разделители */
+  --tm-danger:  #C0504A;   /* красный опасности — неизменен */
+  --tm-textDk:  #3D3C3C;   /* тёмный текст */
+  --tm-textLt:  #6E6D6D;   /* вторичный текст */
+  --tm-surface: #FFFFFF;   /* поверхность карточек */
+  --tm-sageHov: #D87559;   /* hover кнопки — темнее коралла */
+  --tm-sageAct: #C46448;   /* active кнопки */
+
+  --tm-sage10:   rgba(233,133,105,0.10);
+  --tm-sage20:   rgba(233,133,105,0.20);
+  --tm-beige30:  rgba(197,170,150,0.30);
+  --tm-beige40:  rgba(197,170,150,0.40);
+  --tm-danger08: rgba(192,80,74,0.08);
+  --tm-danger12: rgba(192,80,74,0.12);
+  --tm-danger15: rgba(192,80,74,0.15);
+  --tm-olive20:  rgba(197,170,150,0.20);
+  --tm-ivory50:  rgba(166,163,163,0.28);
+  --tm-warm80:   rgba(166,163,163,0.80);
+  --tm-overlay:  rgba(61,60,60,0.45);
+  --tm-hdr:      #EDEBE8;                   /* шапки таблиц: тёплый светлый */
+  --tm-selected: rgba(233,133,105,0.18);    /* светло-коралловый */
+
+  /* Бейджи — адаптированы под корралловую палитру */
+  --tm-badge-draft-bg:         rgba(166,163,163,0.18);  --tm-badge-draft-color:         #6E6D6D;
+  --tm-badge-pending-bg:       rgba(197,170,150,0.35);  --tm-badge-pending-color:       #7A5A40;
+  --tm-badge-approved-bg:      rgba(233,133,105,0.18);  --tm-badge-approved-color:      #8B3A20;
+  --tm-badge-registry-bg:      rgba(197,170,150,0.25);  --tm-badge-registry-color:      #6E5040;
+  --tm-badge-paid-bg:          #E98569;                 --tm-badge-paid-color:          #FFFFFF;
+  --tm-badge-rejected-bg:      rgba(192,80,74,0.15);    --tm-badge-rejected-color:      #8B2020;
+  --tm-badge-planned-bg:       rgba(166,163,163,0.18);  --tm-badge-planned-color:       #6E6D6D;
+  --tm-badge-confirmed-bg:     rgba(233,133,105,0.18);  --tm-badge-confirmed-color:     #8B3A20;
+  --tm-badge-received-bg:      #E98569;                 --tm-badge-received-color:      #FFFFFF;
+
+  --tm-toast-warn:        #D48A50;
+  --tm-toast-warn-text:   #FFFFFF;
+  --tm-toast-warn-border: #B06030;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   TrueMachine palette tokens — Theme D: Изумруд / Бирюза
+   Базовые цвета: #00AA72  #03899C  #00BF32
+   Производные:
+     Фон страниц:  #EDFAF5  (очень светлый изумруд)
+     Surface:      #F8FFFE  (белый с лёгким тилом)
+     Рамки/warm:   #8DBFB8  (приглушённая бирюза)
+     Текст тёмный: #0D2B20  (тёмный лесной зелёный)
+     Текст светлый:#2E7A6E  (средне-бирюзовый)
+   ═══════════════════════════════════════════════════════════ */
+.theme-emerald {
+  --tm-weekend: #5FC0CE;   /* выходные: светло-бирюзовый (из палитры) */
+  --tm-sage:    #00AA72;   /* изумруд — акцент, кнопки, доход */
+  --tm-olive:   #03899C;   /* бирюза — sidebar, вторичные действия */
+  --tm-beige:   #03899C;   /* бирюза — hover состояния */
+  --tm-ivory:   #EDFAF5;   /* светло-мятный — фон страниц и сетки */
+  --tm-warm:    #1E1E1E;   /* чёрные рамки */
+  --tm-danger:  #C0504A;   /* красный — неизменен */
+  --tm-textDk:  #0D2B20;   /* тёмный лесной зелёный */
+  --tm-textLt:  #2E7A6E;   /* средний бирюзово-зелёный */
+  --tm-surface: #F8FFFE;   /* почти белый с лёгким оттенком тила */
+  --tm-sageHov: #009060;   /* hover кнопки — темнее изумруда */
+  --tm-sageAct: #007848;   /* active кнопки */
+
+  /* Производные с прозрачностью */
+  --tm-sage10:   rgba(0,170,114,0.10);
+  --tm-sage20:   rgba(0,170,114,0.20);
+  --tm-beige30:  rgba(3,137,156,0.28);
+  --tm-beige40:  rgba(3,137,156,0.38);
+  --tm-danger08: rgba(192,80,74,0.08);
+  --tm-danger12: rgba(192,80,74,0.12);
+  --tm-danger15: rgba(192,80,74,0.15);
+  --tm-olive20:  rgba(3,137,156,0.18);
+  --tm-ivory50:  rgba(141,191,184,0.25);
+  --tm-warm80:   rgba(141,191,184,0.80);
+  --tm-overlay:  rgba(13,43,32,0.45);
+  --tm-hdr:      #E8F6F2;                   /* шапки таблиц: светлая мята */
+  --tm-selected: rgba(0,170,114,0.18);      /* светло-изумрудный */
+
+  /* Бейджи — #00AA72 изумруд + #03899C бирюза + #00BF32 ярко-зелёный */
+  --tm-badge-draft-bg:         rgba(141,191,184,0.22);  --tm-badge-draft-color:         #2E7A6E;
+  --tm-badge-pending-bg:       rgba(3,137,156,0.18);    --tm-badge-pending-color:       #025E7A;
+  --tm-badge-approved-bg:      rgba(0,170,114,0.18);    --tm-badge-approved-color:      #006040;
+  --tm-badge-registry-bg:      rgba(3,137,156,0.20);    --tm-badge-registry-color:      #035A6E;
+  --tm-badge-paid-bg:          #00BF32;                 --tm-badge-paid-color:          #FFFFFF;
+  --tm-badge-rejected-bg:      rgba(192,80,74,0.15);    --tm-badge-rejected-color:      #8B2020;
+  --tm-badge-planned-bg:       rgba(141,191,184,0.22);  --tm-badge-planned-color:       #2E7A6E;
+  --tm-badge-confirmed-bg:     rgba(0,170,114,0.18);    --tm-badge-confirmed-color:     #006040;
+  --tm-badge-received-bg:      #00BF32;                 --tm-badge-received-color:      #FFFFFF;
+
+  --tm-toast-warn:        #D4A020;
+  --tm-toast-warn-text:   #FFFFFF;
+  --tm-toast-warn-border: #A07810;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+  }
+
+  /**
+  * Default typography styles for HTML elements (h1-h4, p, label, button, input).
+  * These are in @layer base, so Tailwind utility classes (like text-sm, text-lg) automatically override them.
+  */
+
+  html {
+    font-size: var(--font-size);
+  }
+
+  h1 {
+    font-size: var(--text-2xl);
+    font-weight: var(--font-weight-medium);
+    line-height: 1.5;
+  }
+
+  h2 {
+    font-size: var(--text-xl);
+    font-weight: var(--font-weight-medium);
+    line-height: 1.5;
+  }
+
+  h3 {
+    font-size: var(--text-lg);
+    font-weight: var(--font-weight-medium);
+    line-height: 1.5;
+  }
+
+  h4 {
+    font-size: var(--text-base);
+    font-weight: var(--font-weight-medium);
+    line-height: 1.5;
+  }
+
+  label {
+    font-size: var(--text-base);
+    font-weight: var(--font-weight-medium);
+    line-height: 1.5;
+  }
+
+  button {
+    font-size: var(--text-base);
+    font-weight: var(--font-weight-medium);
+    line-height: 1.5;
+  }
+
+  input {
+    font-size: var(--text-base);
+    font-weight: var(--font-weight-normal);
+    line-height: 1.5;
+  }
+}
+
+/* ── §19 Адаптивность ─────────────────────────────────────────
+   Таблицы и сетки горизонтально скроллятся на узких экранах.
+   Минимальная ширина приложения — 768px.
+   ────────────────────────────────────────────────────────── */
+@media (max-width: 1100px) {
+  /* Убираем sidebar-text, оставляем только иконки */
+  .sidebar-label { display: none; }
+}
+
+@media (max-width: 900px) {
+  /* Карточки дашборда в 2 колонки */
+  .dashboard-cards { grid-template-columns: repeat(2, 1fr) !important; }
+  .dashboard-bottom { grid-template-columns: 1fr !important; }
+}
+
+@media (max-width: 768px) {
+  /* Таблицы — горизонтальный скролл */
+  .table-scroll-wrapper { overflow-x: auto; }
+  /* Модалки — полная ширина */
+  .modal-card { width: 100vw !important; max-height: 100vh !important; border-radius: 0 !important; }
+}
