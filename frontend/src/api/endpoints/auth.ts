@@ -1,10 +1,9 @@
 /**
  * authService — авторизация.
  *
- * Бэкенд должен реализовать:
- *   POST /api/login     → { token: string, user: User }
+ *   POST /api/login     → { token: string, user: ApiUser }
  *   POST /api/logout    → { message: string }
- *   GET  /api/me        → User (текущий пользователь)
+ *   GET  /api/me        → ApiUser
  */
 
 import client from "../client";
@@ -12,13 +11,20 @@ import { delay } from "../mocks/handlers";
 import { mockUsers } from "../mocks/data/users";
 import { USE_MOCK } from "../../config";
 
+export interface ApiUser {
+  id: number;
+  name: string;
+  email: string;
+  role: "initiator" | "treasurer" | "manager" | "admin";
+}
+
 export interface LoginPayload  { email: string; password: string; }
-export interface LoginResponse { token: string; user: typeof mockUsers[number]; }
+export interface LoginResponse { token: string; user: ApiUser; }
 
 const real = {
   login:  (data: LoginPayload) => client.post<LoginResponse>("/login", data).then(r => r.data),
   logout: ()                   => client.post("/logout").then(r => r.data),
-  me:     ()                   => client.get("/me").then(r => r.data),
+  me:     ()                   => client.get<ApiUser>("/me").then(r => r.data),
 };
 
 const mock = {
@@ -28,17 +34,14 @@ const mock = {
       throw { response: { status: 401, data: { message: "Неверный email или пароль" } } };
     }
     const token = `mock-jwt-${user.id}-${Date.now()}`;
-    localStorage.setItem("tm_auth_token", token);
-    return delay({ token, user });
+    return delay({ token, user: { id: user.id, name: user.name, email: user.email, role: user.role } });
   },
-  logout: () => {
-    localStorage.removeItem("tm_auth_token");
-    return delay({ message: "OK" });
-  },
+  logout: () => delay({ message: "OK" }),
   me: () => {
     const raw = localStorage.getItem("tm_auth_user");
     const user = raw ? JSON.parse(raw) : null;
-    return delay(user);
+    if (!user) throw { response: { status: 401 } };
+    return delay({ id: user.id, name: user.name, email: user.email, role: user.role });
   },
 };
 

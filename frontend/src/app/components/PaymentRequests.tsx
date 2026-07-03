@@ -37,21 +37,8 @@ const PRIORITY_CFG: Record<Priority, { dot: string; label: string; border?: bool
   low:    { dot: C.sage,   label: "Низкий"                },
 };
 
-const INITIAL_ROWS: Request[] = [
-  { id: 2843, counterparty: "ООО ТехСервис",       article: "Услуги подрядчиков",  purpose: "Разработка ПО",             amount: 85000,  date: "20.06.2026", account: "Расчётный №2", priority: "medium", status: "draft"      },
-  { id: 2844, counterparty: "ИП Смирнов А.В.",     article: "Аренда",              purpose: "Аренда склада",             amount: 45000,  date: "22.06.2026", account: "Расчётный №1", priority: "high",   status: "pending"    },
-  { id: 2845, counterparty: "ООО РентаГрупп",      article: "Аренда офиса",        purpose: "Офис, июнь 2026",           amount: 120000, date: "25.06.2026", account: "Расчётный №1", priority: "low",    status: "approved"   },
-  { id: 2846, counterparty: "АО ТехСервис",        article: "Налоги и сборы",      purpose: "НДС за Q2",                 amount: 340000, date: "28.06.2026", account: "Расчётный №2", priority: "high",   status: "inRegistry" },
-  { id: 2847, counterparty: "ООО Поставщик Альфа", article: "Расходные материалы", purpose: "Канцелярия",                amount: 12500,  date: "18.06.2026", account: "Касса",        priority: "low",    status: "paid"       },
-  { id: 2848, counterparty: "ПАО Энергоресурс",    article: "Услуги подрядчиков",  purpose: "Управленческий консалтинг", amount: 95000,  date: "15.06.2026", account: "Расчётный №1", priority: "medium", status: "rejected"   },
-];
-
 const COLS = "40px 56px 1fr 110px 130px 110px 88px 110px 88px 130px 90px";
-
-/** Семантический порядок сортировки — высокий приоритет первым */
 const PRIORITY_ORDER: Record<Priority, number> = { high: 0, medium: 1, low: 2 };
-
-/** Семантический порядок по жизненному циклу заявки */
 const STATUS_ORDER: Record<Status, number> = {
   draft:      0,
   pending:    1,
@@ -72,11 +59,11 @@ function toModalData(req: Request): ModalRequestData {
   return {
     id:           req.id,
     amount:       String(req.amount),
-    date:         req.date,
-    account:      req.account,
-    counterparty: req.counterparty,
-    article:      req.article,
-    purpose:      req.purpose,
+    date:         String(req.date),
+    account:      String(req.account),
+    counterparty: String(req.counterparty),
+    article:      String(req.article),
+    purpose:      String(req.purpose),
     priority:     req.priority,
   };
 }
@@ -87,23 +74,28 @@ interface PaymentRequestsProps {
 
 const PAGE_SIZE = 8;
 
-/** Преобразует ответ API (planned_date, account_name, item) в формат компонента */
-function mapApiToRequest(p: Record<string, unknown>): Request {
-  const rawDate = (p.planned_date ?? p.date ?? "") as string;
-  const date = rawDate.includes(".")
-    ? rawDate                                        // уже в ДД.ММ.ГГГГ
-    : rawDate.split("-").reverse().join(".");         // ГГГГ-ММ-ДД → ДД.ММ.ГГГГ
-  const rawStatus = (p.status ?? "draft") as string;
+function mapApiToRequest(p: any): Request {
+  const rawDate = p.planned_date ?? p.date ?? "";
+  const date = rawDate.includes(".") ? rawDate : rawDate.split("-").reverse().join(".");
+
+  const counterpartyName = p.counterparty?.name ?? p.counterparty ?? "";
+  const itemName = p.item?.name ?? p.item ?? "";
+  const accountName = p.account?.name ?? p.account ?? "";
+  const purpose = p.purpose ?? "";
+
+  const rawStatus = p.status ?? "draft";
+  const status = rawStatus === "in_registry" ? "inRegistry" : rawStatus;
+
   return {
-    id:           p.id as number,
-    counterparty: (p.counterparty ?? "") as string,
-    article:      ((p.item ?? p.article) ?? "") as string,
-    purpose:      (p.purpose ?? "") as string,
-    amount:       kopecksToRub((p.amount ?? 0) as number),  // копейки → рубли
+    id:           p.id,
+    counterparty: String(counterpartyName),
+    article:      String(itemName),
+    purpose:      String(purpose),
+    amount:       kopecksToRub(p.amount ?? 0),
     date,
-    account:      ((p.account_name ?? p.account) ?? "") as string,
-    priority:     ((p.priority) ?? "medium") as Priority,
-    status:       (rawStatus === "in_registry" ? "inRegistry" : rawStatus) as Status,
+    account:      String(accountName),
+    priority:     p.priority ?? "medium",
+    status:       status as Status,
   };
 }
 
@@ -128,17 +120,24 @@ export function PaymentRequests({ onCreateRequest }: PaymentRequestsProps) {
   const [deleteRequest,   setDeleteRequest]   = useState<Request | null>(null);
   const [showImport,      setShowImport]      = useState(false);
 
-  // ── Load from API (STUB: replace with real backend when VITE_USE_MOCK=false) ──
   const loadData = () => {
-    setLoading(true); setLoadError(null);
+    setLoading(true);
+    setLoadError(null);
     api.payments.getAll()
-      .then(data => setRows((data as unknown[]).map(p => mapApiToRequest(p as Record<string, unknown>))))
-      .catch(() => setLoadError("Не удалось загрузить заявки"))
+      .then(data => {
+        console.log('Raw API data:', data);
+        const mapped = (data as unknown[]).map(p => mapApiToRequest(p));
+        console.log('Mapped data:', mapped);
+        setRows(mapped);
+      })
+      .catch((err) => {
+        console.error('Ошибка загрузки:', err);
+        setLoadError("Не удалось загрузить заявки");
+      })
       .finally(() => setLoading(false));
   };
-  useEffect(() => { loadData(); }, []);
 
-  // Reset page on filter change
+  useEffect(() => { loadData(); }, []);
   useEffect(() => { setActivePage(1); }, [search, statusF, accountF, dateFrom, dateTo]);
 
   const clearFilters = () => {
@@ -161,10 +160,8 @@ export function PaymentRequests({ onCreateRequest }: PaymentRequestsProps) {
     ? [...filtered].sort((a, b) => {
         let cmp: number;
         if (sortKey === "priority") {
-          // Высокий → Средний → Низкий (не по алфавиту)
           cmp = (PRIORITY_ORDER[a.priority] ?? 99) - (PRIORITY_ORDER[b.priority] ?? 99);
         } else if (sortKey === "status") {
-          // По жизненному циклу: черновик → согласована → оплачена
           cmp = (STATUS_ORDER[a.status] ?? 99) - (STATUS_ORDER[b.status] ?? 99);
         } else {
           cmp = String(a[sortKey]).localeCompare(String(b[sortKey]), "ru", { numeric: true });
@@ -182,11 +179,10 @@ export function PaymentRequests({ onCreateRequest }: PaymentRequestsProps) {
     setSelected(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
 
   const handleSaveRequest = (data: ModalRequestData, asDraft: boolean) => {
-    const parseAmt = (v?: string) => parseFloat((v ?? "0").replace(/\s/g, "").replace(",", ".")) || 0;
     if (data.id) {
       setRows(prev => prev.map(r => r.id === data.id ? {
         ...r,
-        amount:       kopecksToRub(rubToKopecks(data.amount ?? "0")) || r.amount,  // руб → копейки → руб
+        amount:       kopecksToRub(rubToKopecks(data.amount ?? "0")) || r.amount,
         date:         data.date         || r.date,
         account:      data.account      || r.account,
         counterparty: data.counterparty || r.counterparty,
@@ -202,7 +198,7 @@ export function PaymentRequests({ onCreateRequest }: PaymentRequestsProps) {
         counterparty: data.counterparty ?? "",
         article:      data.article      ?? "",
         purpose:      data.purpose      ?? "",
-        amount:       kopecksToRub(rubToKopecks(data.amount ?? "0")),  // форма в рублях → kopecksToRub для хранения
+        amount:       kopecksToRub(rubToKopecks(data.amount ?? "0")),
         date:         data.date         ?? "26.06.2026",
         account:      data.account      ?? "",
         priority:     (data.priority as Priority) ?? "medium",
@@ -251,7 +247,6 @@ export function PaymentRequests({ onCreateRequest }: PaymentRequestsProps) {
   return (
     <>
       <div style={{ display: "flex", flexDirection: "column", height: "100%", fontFamily: "Inter, sans-serif" }}>
-
         {/* ── Filter + action bar ── */}
         <div style={{ background: C.surface, borderBottom: `1px solid ${C.warm}`, padding: "12px 24px", display: "flex", alignItems: "center", gap: 8, flexShrink: 0, flexWrap: "wrap" }}>
           <div style={{ position: "relative", flexShrink: 0 }}>
@@ -308,8 +303,6 @@ export function PaymentRequests({ onCreateRequest }: PaymentRequestsProps) {
         {/* ── Table ── */}
         <div style={{ flex: 1, overflow: "auto", padding: "16px 24px 0" }}>
           <div style={{ background: C.surface, border: `1px solid ${C.warm}`, borderRadius: 8, overflow: "hidden", boxShadow: "0 1px 3px rgba(44,44,30,0.08)", minWidth: 1100 }}>
-
-            {/* Header with sort */}
             <div style={{ display: "grid", gridTemplateColumns: COLS, background: C.hdr, borderBottom: `1px solid ${C.warm}` }}>
               <div style={{ padding: "10px 12px", display: "flex", alignItems: "center" }}>
                 <CheckBox checked={allSelected} onChange={toggleAll} />
@@ -331,7 +324,6 @@ export function PaymentRequests({ onCreateRequest }: PaymentRequestsProps) {
               })}
             </div>
 
-            {/* Loading / Error / Rows */}
             {loading && <TableSkeleton rows={PAGE_SIZE} cols={COLS} />}
             {!loading && loadError && <TableError message={loadError} onRetry={loadData} />}
             {!loading && !loadError && paged.map((req, idx) => {
@@ -347,26 +339,25 @@ export function PaymentRequests({ onCreateRequest }: PaymentRequestsProps) {
                   onMouseEnter={() => setHovered(req.id)}
                   onMouseLeave={() => setHovered(null)}
                   style={{ display: "grid", gridTemplateColumns: COLS, background: bg, borderBottom: `1px solid rgba(192,192,160,0.40)`, transition: "background 0.1s" }}>
-
                   <div style={{ padding: "10px 12px", display: "flex", alignItems: "center" }}>
                     <CheckBox checked={isSel} onChange={() => toggleRow(req.id)} />
                   </div>
-                  <div style={{ padding: "10px 10px", display: "flex", alignItems: "center", fontSize: 12, color: C.textLt, fontVariantNumeric: "tabular-nums" }}>{req.id}</div>
+                  <div style={{ padding: "10px 10px", display: "flex", alignItems: "center", fontSize: 12, color: C.textLt, fontVariantNumeric: "tabular-nums" }}>{String(req.id)}</div>
                   <div style={{ padding: "10px 10px", display: "flex", alignItems: "center", fontSize: 13, color: C.textDk, fontWeight: 500, overflow: "hidden" }}>
-                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{req.counterparty}</span>
+                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{String(req.counterparty)}</span>
                   </div>
                   <div style={{ padding: "10px 10px", display: "flex", alignItems: "center", fontSize: 12, color: C.textLt, overflow: "hidden" }}>
-                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{req.article}</span>
+                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{String(req.article)}</span>
                   </div>
                   <div style={{ padding: "10px 10px", display: "flex", alignItems: "center", fontSize: 12, color: C.textLt, overflow: "hidden" }}>
-                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{req.purpose}</span>
+                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{String(req.purpose)}</span>
                   </div>
                   <div style={{ padding: "10px 10px", display: "flex", alignItems: "center", fontSize: 13, fontWeight: 500, fontVariantNumeric: "tabular-nums", color: C.textDk, whiteSpace: "nowrap" }}>
                     {formatRubFromRub(req.amount)}
                   </div>
-                  <div style={{ padding: "10px 10px", display: "flex", alignItems: "center", fontSize: 12, color: C.textLt, whiteSpace: "nowrap" }}>{req.date}</div>
+                  <div style={{ padding: "10px 10px", display: "flex", alignItems: "center", fontSize: 12, color: C.textLt, whiteSpace: "nowrap" }}>{String(req.date)}</div>
                   <div style={{ padding: "10px 10px", display: "flex", alignItems: "center", fontSize: 12, color: C.textLt, overflow: "hidden" }}>
-                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{req.account}</span>
+                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{String(req.account)}</span>
                   </div>
                   <div style={{ padding: "10px 10px", display: "flex", alignItems: "center", gap: 5 }}>
                     <span style={{ width: 8, height: 8, borderRadius: "50%", background: pc.dot, flexShrink: 0, border: pc.border ? "1px solid #C0A070" : undefined }} />
@@ -404,7 +395,6 @@ export function PaymentRequests({ onCreateRequest }: PaymentRequestsProps) {
           </div>
         </div>
 
-        {/* ── Bulk action bar (появляется при выборе строк) ── */}
         {selected.size > 0 && (
           <div style={{ margin: "0 24px 12px", padding: "10px 16px", background: C.ivory, border: `1px solid ${C.warm}`, borderRadius: 8, display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
             <span style={{ fontSize: 13, color: C.textDk, fontWeight: 500 }}>
@@ -433,7 +423,6 @@ export function PaymentRequests({ onCreateRequest }: PaymentRequestsProps) {
           </div>
         )}
 
-        {/* ── Pagination (real) ── */}
         <div style={{ padding: "10px 24px 14px", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
           <span style={{ fontSize: 12, color: C.textLt }}>
             {sorted.length > 0 ? `Показано ${(activePage-1)*PAGE_SIZE+1}–${Math.min(activePage*PAGE_SIZE, sorted.length)} из ${sorted.length}` : ""}
@@ -456,7 +445,6 @@ export function PaymentRequests({ onCreateRequest }: PaymentRequestsProps) {
         </div>
       </div>
 
-      {/* ── Create modal ── */}
       {showCreateModal && (
         <CreateRequestModal
           onClose={() => setShowCreateModal(false)}
@@ -464,7 +452,6 @@ export function PaymentRequests({ onCreateRequest }: PaymentRequestsProps) {
         />
       )}
 
-      {/* ── Edit modal ── */}
       {editRequest && (
         <CreateRequestModal
           initialData={toModalData(editRequest)}
@@ -473,7 +460,6 @@ export function PaymentRequests({ onCreateRequest }: PaymentRequestsProps) {
         />
       )}
 
-      {/* ── Delete confirm ── */}
       {deleteRequest && (
         <DeleteConfirmDialog
           id={deleteRequest.id}
@@ -482,7 +468,6 @@ export function PaymentRequests({ onCreateRequest }: PaymentRequestsProps) {
         />
       )}
 
-      {/* ── Import modal ── */}
       {showImport && (
         <ImportModal
           onClose={() => setShowImport(false)}
@@ -497,18 +482,14 @@ export function PaymentRequests({ onCreateRequest }: PaymentRequestsProps) {
   );
 }
 
-/* ── Sub-components ───────────────────────────────── */
-
-function DropFilter({ value, onChange, placeholder, options, width }: {
-  value: string; onChange: (v: string) => void; placeholder: string;
-  options: { value: string; label: string }[]; width: number;
-}) {
+// ── Вспомогательные компоненты (они уже есть, оставляем без изменений) ──
+function DropFilter({ value, onChange, placeholder, options, width }: any) {
   return (
     <div style={{ position: "relative", flexShrink: 0 }}>
-      <select value={value} onChange={e => onChange(e.target.value)}
+      <select value={String(value)} onChange={e => onChange(e.target.value)}
         style={{ width, padding: "7px 26px 7px 10px", border: `1px solid ${C.warm}`, borderRadius: 6, background: C.surface, fontSize: 13, color: value ? C.textDk : C.textLt, outline: "none", appearance: "none", cursor: "pointer", fontFamily: "Inter, sans-serif" }}>
         <option value="">{placeholder}</option>
-        {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+        {options.map((o: any) => <option key={o.value} value={String(o.value)}>{String(o.label)}</option>)}
       </select>
       <div style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", pointerEvents: "none", color: C.textLt, display: "flex" }}>
         <ChevronDown size={13} />
@@ -517,7 +498,7 @@ function DropFilter({ value, onChange, placeholder, options, width }: {
   );
 }
 
-function CheckBox({ checked, onChange }: { checked: boolean; onChange: () => void }) {
+function CheckBox({ checked, onChange }: any) {
   return (
     <div onClick={e => { e.stopPropagation(); onChange(); }}
       style={{ width: 16, height: 16, borderRadius: 3, border: checked ? "none" : `1.5px solid ${C.warm}`, background: checked ? C.sage : C.surface, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0, transition: "background 0.15s" }}>
@@ -530,9 +511,7 @@ function CheckBox({ checked, onChange }: { checked: boolean; onChange: () => voi
   );
 }
 
-function IconBtn({ children, title, hoverColor, onClick }: {
-  children: React.ReactNode; title: string; hoverColor: string; onClick?: () => void;
-}) {
+function IconBtn({ children, title, hoverColor, onClick }: any) {
   const [hov, setHov] = useState(false);
   return (
     <button title={title} onClick={onClick}
@@ -543,7 +522,7 @@ function IconBtn({ children, title, hoverColor, onClick }: {
   );
 }
 
-function PageBtn({ label, active, disabled, onClick }: { label: string; active: boolean; disabled?: boolean; onClick: () => void }) {
+function PageBtn({ label, active, disabled, onClick }: any) {
   return (
     <button onClick={disabled ? undefined : onClick} disabled={disabled}
       style={{ width: 32, height: 32, borderRadius: 6, border: "none", background: active ? C.sage : C.ivory, color: active ? C.surface : disabled ? C.warm : C.textLt, fontSize: 13, fontWeight: active ? 600 : 400, cursor: disabled ? "not-allowed" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "Inter, sans-serif", transition: "background 0.15s" }}>
@@ -552,9 +531,7 @@ function PageBtn({ label, active, disabled, onClick }: { label: string; active: 
   );
 }
 
-function DeleteConfirmDialog({ id, onConfirm, onCancel }: {
-  id: number; onConfirm: () => void; onCancel: () => void;
-}) {
+function DeleteConfirmDialog({ id, onConfirm, onCancel }: any) {
   return (
     <div onClick={onCancel}
       style={{ position: "fixed", inset: 0, background: C.overlay, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1100, fontFamily: "Inter, sans-serif" }}>
@@ -575,205 +552,6 @@ function DeleteConfirmDialog({ id, onConfirm, onCancel }: {
             style={{ padding: "9px 16px", borderRadius: 6, background: "transparent", color: C.olive, border: `1.5px solid ${C.warm}`, fontSize: 14, cursor: "pointer", fontFamily: "Inter, sans-serif" }}>
             Отмена
           </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ── CSV parser helpers ─────────────────────────────── */
-function splitCsvLine(line: string, sep: string): string[] {
-  const result: string[] = [];
-  let cur = "";
-  let inQ = false;
-  for (let i = 0; i < line.length; i++) {
-    const c = line[i];
-    if (c === '"') {
-      if (inQ && line[i + 1] === '"') { cur += '"'; i++; }
-      else inQ = !inQ;
-    } else if (c === sep && !inQ) { result.push(cur); cur = ""; }
-    else cur += c;
-  }
-  result.push(cur);
-  return result;
-}
-
-function parseCsvToRequests(text: string, idOffset: number): Request[] {
-  const cleaned = text.replace(/^﻿/, "");
-  const sep     = cleaned.split("\n")[0].includes(";") ? ";" : ",";
-  const lines   = cleaned.split(/\r?\n/).filter(l => l.trim());
-  if (lines.length < 2) return [];
-
-  const headers = splitCsvLine(lines[0], sep).map(h => h.replace(/"/g, "").trim());
-  const idx     = (name: string) => headers.findIndex(h => h === name);
-
-  const iCp  = idx("Контрагент");
-  const iArt = idx("Статья");
-  const iPur = idx("Назначение");
-  const iAmt = idx("Сумма");
-  const iDt  = idx("Дата");
-  const iAcc = idx("Счёт");
-  const iPri = idx("Приоритет");
-
-  const priMap: Record<string, Priority> = {
-    "Высокий": "high", "Средний": "medium", "Низкий": "low",
-  };
-
-  return lines.slice(1).map((line, i) => {
-    const cols = splitCsvLine(line, sep).map(c => c.replace(/"/g, "").trim());
-    const get  = (n: number) => (n >= 0 ? cols[n] ?? "" : "");
-    const amtStr = get(iAmt).replace(/[₽\s ]/g, "").replace(",", ".");
-    return {
-      id:           idOffset + i + 1,
-      counterparty: get(iCp)  || "—",
-      article:      get(iArt) || "—",
-      purpose:      get(iPur) || "—",
-      amount:       parseFloat(amtStr) || 0,
-      date:         get(iDt)  || "01.07.2026",
-      account:      get(iAcc) || "Расчётный №1",
-      priority:     priMap[get(iPri)] ?? "medium",
-      status:       "draft" as Status,
-    };
-  }).filter(r => r.counterparty !== "—" || r.amount > 0);
-}
-
-/* ── ImportModal ─────────────────────────────────────── */
-interface ImportModalProps {
-  onClose:  () => void;
-  onImport: (rows: Request[]) => void;
-}
-
-function ImportModal({ onClose, onImport }: ImportModalProps) {
-  const [dragOver, setDragOver] = useState(false);
-  const [file,     setFile]     = useState<File | null>(null);
-  const [parsed,   setParsed]   = useState<Request[] | null>(null);
-  const [error,    setError]    = useState("");
-  const [idBase]                = useState(() => Date.now());
-
-  const readFile = (f: File) => {
-    setFile(f);
-    setParsed(null);
-    setError("");
-    const reader = new FileReader();
-    reader.onload = e => {
-      try {
-        const text = e.target?.result as string;
-        const rows = parseCsvToRequests(text, idBase);
-        if (rows.length === 0) {
-          setError("Не удалось распознать строки. Проверьте формат: заголовки должны совпадать с экспортом.");
-        } else {
-          setParsed(rows);
-        }
-      } catch {
-        setError("Ошибка чтения файла.");
-      }
-    };
-    reader.readAsText(f, "UTF-8");
-  };
-
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault(); setDragOver(false);
-    const f = e.dataTransfer.files[0];
-    if (f) readFile(f);
-  };
-
-  const handleInput = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0];
-    if (f) readFile(f);
-  };
-
-  return (
-    <div onClick={onClose}
-      style={{ position:"fixed", inset:0, background:C.overlay, display:"flex", alignItems:"center", justifyContent:"center", zIndex:1100, fontFamily:"Inter, sans-serif" }}>
-      <div onClick={e => e.stopPropagation()}
-        style={{ width: parsed ? 680 : 480, maxHeight:"88vh", background:C.surface, border:`1px solid ${C.warm}`, borderRadius:12, overflow:"hidden", boxShadow:"0 4px 24px rgba(44,44,30,0.18)", display:"flex", flexDirection:"column", transition:"width 0.2s" }}>
-
-        {/* Header */}
-        <div style={{ padding:"18px 24px 14px", display:"flex", alignItems:"center", justifyContent:"space-between", borderBottom:`1px solid ${C.warm}`, flexShrink:0 }}>
-          <div>
-            <h2 style={{ fontSize:16, fontWeight:600, color:C.textDk, margin:0 }}>Импорт из CSV</h2>
-            {!parsed && (
-              <p style={{ fontSize:11, color:C.textLt, margin:"4px 0 0" }}>
-                Ожидается файл в формате экспорта TrueMachine (разделитель — точка с запятой, кодировка UTF-8)
-              </p>
-            )}
-          </div>
-          <button onClick={onClose} style={{ background:"none", border:"none", cursor:"pointer", color:C.textLt, padding:4, display:"flex" }}><X size={18} /></button>
-        </div>
-
-        {/* Body */}
-        <div style={{ padding:"20px 24px", overflowY:"auto", flex:1 }}>
-          {/* Drop zone — always shown, smaller when preview is active */}
-          {!parsed && (
-            <div
-              onDragOver={e => { e.preventDefault(); setDragOver(true); }}
-              onDragLeave={() => setDragOver(false)}
-              onDrop={handleDrop}
-              onClick={() => document.getElementById("csv-input")?.click()}
-              style={{ border:`2px dashed ${dragOver ? C.sage : C.warm}`, borderRadius:8, padding:"32px 24px", display:"flex", flexDirection:"column", alignItems:"center", gap:10, background:dragOver ? C.sage10 : C.ivory, cursor:"pointer", transition:"all 0.15s" }}
-            >
-              <Upload size={28} color={dragOver ? C.sage : C.warm} />
-              <span style={{ fontSize:14, fontWeight:500, color:C.textDk }}>
-                {file ? file.name : "Перетащите .csv файл сюда"}
-              </span>
-              <span style={{ fontSize:12, color:C.textLt }}>
-                {file ? "Разбираю файл…" : "или нажмите для выбора · .csv"}
-              </span>
-            </div>
-          )}
-
-          {file && parsed && (
-            <div style={{ marginBottom:14 }}>
-              <div style={{ display:"flex", alignItems:"center", gap:10, padding:"8px 12px", background:C.sage10, borderRadius:6, border:`1px solid ${C.sage}`, marginBottom:12 }}>
-                <span style={{ fontSize:13, color:C.sage, fontWeight:600 }}>✓ {file.name}</span>
-                <span style={{ fontSize:12, color:C.textLt }}>распознано {parsed.length} заявок</span>
-                <button onClick={() => { setFile(null); setParsed(null); }}
-                  style={{ marginLeft:"auto", background:"none", border:`1px solid ${C.warm}`, borderRadius:4, padding:"2px 8px", fontSize:11, color:C.textLt, cursor:"pointer", fontFamily:"Inter, sans-serif" }}>
-                  Другой файл
-                </button>
-              </div>
-
-              {/* Preview table */}
-              <div style={{ border:`1px solid ${C.warm}`, borderRadius:8, overflow:"hidden", maxHeight:300, overflowY:"auto" }}>
-                <div style={{ display:"grid", gridTemplateColumns:"50px 1fr 110px 90px 90px 90px", background:C.hdr, position:"sticky", top:0 }}>
-                  {["№","Контрагент","Статья","Сумма","Дата","Счёт"].map(h => (
-                    <div key={h} style={{ padding:"8px 10px", fontSize:11, fontWeight:600, color:C.textDk }}>{h}</div>
-                  ))}
-                </div>
-                {parsed.map((r, i) => (
-                  <div key={r.id} style={{ display:"grid", gridTemplateColumns:"50px 1fr 110px 90px 90px 90px", background:i%2===0 ? C.surface : C.ivory50, borderBottom:`1px solid rgba(192,192,160,0.3)` }}>
-                    <div style={{ padding:"7px 10px", fontSize:12, color:C.textLt }}>{i+1}</div>
-                    <div style={{ padding:"7px 10px", fontSize:12, color:C.textDk, fontWeight:500, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{r.counterparty}</div>
-                    <div style={{ padding:"7px 10px", fontSize:12, color:C.textLt, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{r.article}</div>
-                    <div style={{ padding:"7px 10px", fontSize:12, color:C.textDk, fontVariantNumeric:"tabular-nums" }}>{ruFmt(r.amount)} ₽</div>
-                    <div style={{ padding:"7px 10px", fontSize:12, color:C.textLt }}>{r.date}</div>
-                    <div style={{ padding:"7px 10px", fontSize:12, color:C.textLt, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{r.account}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {error && (
-            <div style={{ padding:"12px 14px", background:"rgba(192,80,74,0.08)", border:`1px solid ${C.danger}`, borderRadius:6, fontSize:12, color:"#8B2020" }}>
-              {error}
-            </div>
-          )}
-        </div>
-
-        {/* Footer */}
-        <div style={{ borderTop:`1px solid ${C.warm}`, padding:"14px 24px", display:"flex", gap:10, flexShrink:0 }}>
-          <button
-            disabled={!parsed}
-            onClick={() => parsed && onImport(parsed)}
-            style={{ padding:"9px 20px", borderRadius:6, background:parsed ? C.sage : C.warm, color:C.surface, border:"none", fontSize:13, fontWeight:500, cursor:parsed ? "pointer" : "not-allowed", fontFamily:"Inter, sans-serif" }}>
-            Импортировать {parsed ? `(${parsed.length})` : ""}
-          </button>
-          <button onClick={onClose}
-            style={{ padding:"9px 14px", borderRadius:6, background:"transparent", color:C.olive, border:`1.5px solid ${C.warm}`, fontSize:13, cursor:"pointer", fontFamily:"Inter, sans-serif" }}>
-            Отмена
-          </button>
-          <input id="csv-input" type="file" accept=".csv" hidden onChange={handleInput} />
         </div>
       </div>
     </div>

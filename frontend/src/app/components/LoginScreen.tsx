@@ -1,28 +1,20 @@
 import { useState } from "react";
 import { Eye, EyeOff } from "lucide-react";
 import { C } from "../tokens";
-import { useAuth, DEMO_USERS, ROLE_LABELS, type AuthUser } from "../context/AuthContext";
+import { useAuth } from "../context/AuthContext";
 import { email as validateEmail, minLen, firstError } from "../utils/validation";
 
-const ROLE_COLORS = {
-  initiator: { bg: "rgba(160,160,128,0.18)", color: "#555540" },
-  treasurer: { bg: "rgba(128,160,128,0.18)", color: "#3D6B3D" },
-  manager:   { bg: "#E0C0A0",                color: "#7A5A30" },
-  admin:     { bg: "rgba(192,80,74,0.14)",   color: "#8B2020" },
-};
-
 export function LoginScreen() {
-  const { login, loginAs } = useAuth();
+  const { login } = useAuth();
 
-  const [email,    setEmail]    = useState("i.petrov@truemachine.ru"); // Казначей по умолчанию
-  const [password, setPassword] = useState("demo");
+  const [email,    setEmail]    = useState("");
+  const [password, setPassword] = useState("");
   const [showPw,   setShowPw]   = useState(false);
   const [error,    setError]    = useState("");
   const [loading,  setLoading]  = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // Клиентская валидация перед запросом
     const validationError = firstError(
       validateEmail(email),
       minLen(4, password) && "Пароль: минимум 4 символа",
@@ -33,10 +25,6 @@ export function LoginScreen() {
     const result = await login(email, password);
     setLoading(false);
     if (!result.ok) setError(result.error ?? "Ошибка входа");
-  };
-
-  const handleDemoLogin = (user: AuthUser) => {
-    loginAs(user);
   };
 
   return (
@@ -105,7 +93,6 @@ export function LoginScreen() {
           </h2>
 
           <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-            {/* Email */}
             <div>
               <label style={{ fontSize: 12, fontWeight: 500, color: C.textLt, display: "block", marginBottom: 6 }}>
                 Email
@@ -114,8 +101,9 @@ export function LoginScreen() {
                 type="email"
                 value={email}
                 onChange={e => setEmail(e.target.value)}
-                placeholder="user@truemachine.ru"
+                placeholder="initiator@example.com"
                 required
+                autoComplete="email"
                 style={{
                   width: "100%",
                   padding: "9px 12px",
@@ -134,7 +122,6 @@ export function LoginScreen() {
               />
             </div>
 
-            {/* Password */}
             <div>
               <label style={{ fontSize: 12, fontWeight: 500, color: C.textLt, display: "block", marginBottom: 6 }}>
                 Пароль
@@ -146,6 +133,7 @@ export function LoginScreen() {
                   onChange={e => setPassword(e.target.value)}
                   placeholder="••••••••"
                   required
+                  autoComplete="current-password"
                   style={{
                     width: "100%",
                     padding: "9px 40px 9px 12px",
@@ -176,7 +164,6 @@ export function LoginScreen() {
               </div>
             </div>
 
-            {/* Error */}
             {error && (
               <div
                 style={{
@@ -192,7 +179,6 @@ export function LoginScreen() {
               </div>
             )}
 
-            {/* Submit */}
             <button
               type="submit"
               disabled={loading}
@@ -213,87 +199,6 @@ export function LoginScreen() {
               {loading ? "Вход…" : "Войти"}
             </button>
           </form>
-        </div>
-
-        {/* Demo access */}
-        <div
-          style={{
-            marginTop: 20,
-            background: C.surface,
-            border: `1px solid ${C.warm}`,
-            borderRadius: 12,
-            padding: "20px 24px",
-            boxShadow: "0 1px 8px rgba(44,44,30,0.07)",
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
-            <div style={{ flex: 1, height: 1, background: C.warm }} />
-            <span style={{ fontSize: 11, color: C.textLt, fontWeight: 500, whiteSpace: "nowrap" }}>
-              ДЕМО-ДОСТУП · любой пароль
-            </span>
-            <div style={{ flex: 1, height: 1, background: C.warm }} />
-          </div>
-
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {DEMO_USERS.map(u => {
-              const rc = ROLE_COLORS[u.role];
-              return (
-                <button
-                  key={u.id}
-                  onClick={() => handleDemoLogin(u)}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 12,
-                    padding: "9px 14px",
-                    borderRadius: 8,
-                    border: `1px solid ${C.warm}`,
-                    background: "transparent",
-                    cursor: "pointer",
-                    fontFamily: "Inter, sans-serif",
-                    textAlign: "left",
-                    transition: "background 0.12s, border 0.12s",
-                  }}
-                  onMouseEnter={e => {
-                    (e.currentTarget as HTMLButtonElement).style.background = C.ivory;
-                    (e.currentTarget as HTMLButtonElement).style.borderColor = C.sage;
-                  }}
-                  onMouseLeave={e => {
-                    (e.currentTarget as HTMLButtonElement).style.background = "transparent";
-                    (e.currentTarget as HTMLButtonElement).style.borderColor = C.warm;
-                  }}
-                >
-                  <div
-                    style={{
-                      width: 34, height: 34, borderRadius: "50%",
-                      background: C.sage, display: "flex", alignItems: "center",
-                      justifyContent: "center", color: C.surface,
-                      fontSize: 12, fontWeight: 600, flexShrink: 0,
-                    }}
-                  >
-                    {u.avatar}
-                  </div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: C.textDk }}>{u.name}</div>
-                    <div style={{ fontSize: 11, color: C.textLt, marginTop: 1 }}>{u.email}</div>
-                  </div>
-                  <span
-                    style={{
-                      padding: "2px 9px",
-                      borderRadius: 4,
-                      fontSize: 11,
-                      fontWeight: 500,
-                      background: rc.bg,
-                      color: rc.color,
-                      flexShrink: 0,
-                    }}
-                  >
-                    {ROLE_LABELS[u.role]}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
         </div>
 
         <p style={{ textAlign: "center", fontSize: 11, color: C.textLt, marginTop: 16 }}>

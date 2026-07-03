@@ -31,7 +31,7 @@ const SCREEN_TITLES: Record<Screen, string> = {
 };
 
 function AppShell() {
-  const { isAuthed, user, perms } = useAuth();
+  const { isAuthed, initializing, user, perms } = useAuth();
 
   const [screen,            setScreen]            = useState<Screen>("dashboard");
   const [showModal,         setShowModal]          = useState(false);
@@ -50,6 +50,14 @@ function AppShell() {
   const handleScreenChange = (s: Screen) => {
     if (allowedScreens.includes(s)) { setScreen(s); setShowDrawer(false); }
   };
+
+  if (initializing) {
+    return (
+      <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "Inter, sans-serif", color: "#555540" }}>
+        Загрузка…
+      </div>
+    );
+  }
 
   if (!isAuthed) return <LoginScreen />;
 

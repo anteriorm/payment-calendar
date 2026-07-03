@@ -27,57 +27,52 @@ const STATUS_CFG: Record<IncomeStatus, { bg: string; color: string; label: strin
   received:  { ...C.badge.received,  label: "Получено"     },
 };
 
-const ROWS: IncomeRow[] = [
-  { id: 2303, counterparty: "ПАО Инвестбанк",    article: "Прочие доходы",       purpose: "Проценты по депозиту",   amount: 32000,  date: "30.06.2026", account: "Касса",        status: "planned"   },
-  { id: 2302, counterparty: "ИП Коваленко Д.М.", article: "Прочие доходы",       purpose: "Возврат переплаты",      amount: 45000,  date: "26.06.2026", account: "Расчётный №2", status: "planned"   },
-  { id: 2301, counterparty: "ООО Альфа-Трейд",   article: "Выручка от клиентов", purpose: "Оплата за услуги июнь",  amount: 280000, date: "25.06.2026", account: "Расчётный №1", status: "confirmed" },
-  { id: 2304, counterparty: "АО СтройИнвест",    article: "Выручка от клиентов", purpose: "Частичная оплата дог.7", amount: 185000, date: "24.06.2026", account: "Расчётный №1", status: "confirmed" },
-  { id: 2300, counterparty: "АО СтройГрупп",     article: "Выручка от клиентов", purpose: "Аванс по договору №12",  amount: 650000, date: "20.06.2026", account: "Расчётный №1", status: "received"  },
-  { id: 2299, counterparty: "ООО ЛогистикПро",   article: "Выручка от клиентов", purpose: "Оплата счёта № 145",     amount: 120000, date: "18.06.2026", account: "Расчётный №2", status: "received"  },
-];
-
-const COLS = "40px 56px 1fr 130px 150px 130px 90px 120px 130px 90px";
-
-/** Плановое → Подтверждено → Получено (по жизненному циклу поступления) */
-const INCOME_STATUS_ORDER: Record<IncomeStatus, number> = {
-  planned:   0,
-  confirmed: 1,
-  received:  2,
-};
+const INCOME_STATUS_ORDER: Record<IncomeStatus, number> = { planned: 0, confirmed: 1, received: 2 };
 
 function ruFmt(n: number): string {
-  const s = Math.floor(n).toString();
+  const s = Math.floor(Math.abs(n)).toString();
   const parts: string[] = [];
   for (let i = s.length; i > 0; i -= 3) parts.unshift(s.slice(Math.max(0, i - 3), i));
   return parts.join(" ");
 }
 
-interface IncomeProps {
-  onCreateIncome?: () => void;
-  canCreate?:      boolean;
-}
+interface IncomeProps { canCreate?: boolean; }
 
 const PAGE_SIZE_INC = 8;
 
-/** Маппер API-формата → внутренний формат компонента */
-function mapApiToIncome(i: Record<string, unknown>): IncomeRow {
-  const rawDate = (i.planned_date ?? i.date ?? "") as string;
-  const date = rawDate.includes(".")
-    ? rawDate
-    : rawDate.split("-").reverse().join(".");
+function safeString(value: any): string {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "number") return String(value);
+  if (typeof value === "object") {
+    if ("name" in value) return String(value.name);
+    return JSON.stringify(value);
+  }
+  return String(value);
+}
+
+function mapApiToIncome(p: any): IncomeRow {
+  const rawDate = p.planned_date ?? p.date ?? "";
+  const date = rawDate.includes(".") ? rawDate : rawDate.split("-").reverse().join(".");
+
+  const counterpartyName = p.counterparty?.name ?? p.counterparty ?? "";
+  const itemName = p.item?.name ?? p.item ?? "";
+  const accountName = p.account?.name ?? p.account ?? "";
+  const purpose = p.purpose ?? "";
+
   return {
-    id:           i.id as number,
-    counterparty: (i.counterparty ?? "") as string,
-    article:      ((i.item ?? i.article) ?? "") as string,
-    purpose:      (i.purpose ?? "") as string,
-    amount:       kopecksToRub((i.amount ?? 0) as number),  // копейки → рубли
+    id:           p.id,
+    counterparty: safeString(counterpartyName),
+    article:      safeString(itemName),
+    purpose:      safeString(purpose),
+    amount:       kopecksToRub(p.amount ?? 0),
     date,
-    account:      ((i.account_name ?? i.account) ?? "") as string,
-    status:       ((i.status) ?? "planned") as IncomeStatus,
+    account:      safeString(accountName),
+    status:       (p.status as IncomeStatus) ?? "planned",
   };
 }
 
-export function Income({ onCreateIncome, canCreate = true }: IncomeProps) {
+export function Income({ canCreate = true }: IncomeProps) {
   const { showToast } = useToast();
   const [rows,       setRows]       = useState<IncomeRow[]>([]);
   const [loading,    setLoading]    = useState(true);
@@ -92,19 +87,29 @@ export function Income({ onCreateIncome, canCreate = true }: IncomeProps) {
   const [hovered,    setHovered]    = useState<number | null>(null);
   const [selected,   setSelected]   = useState<Set<number>>(new Set());
   const [activePage, setActivePage] = useState(1);
-
-  const loadData = () => {
-    setLoading(true); setLoadError(null);
-    api.incomes.getAll()
-      .then(data => setRows((data as unknown[]).map(i => mapApiToIncome(i as Record<string, unknown>))))
-      .catch(() => setLoadError("Не удалось загрузить поступления"))
-      .finally(() => setLoading(false));
-  };
-  useEffect(() => { loadData(); }, []);
-  useEffect(() => { setActivePage(1); }, [search, statusF, accountF]);
   const [editTarget, setEditTarget] = useState<IncomeRow | null>(null);
   const [delTarget,  setDelTarget]  = useState<IncomeRow | null>(null);
   const [showCreate, setShowCreate] = useState(false);
+
+  const loadData = () => {
+    setLoading(true);
+    setLoadError(null);
+    api.incomes.getAll()
+      .then(data => {
+        console.log('Raw Income API data:', data);
+        const mapped = (data as unknown[]).map(p => mapApiToIncome(p));
+        console.log('Mapped Income data:', mapped);
+        setRows(mapped);
+      })
+      .catch((err) => {
+        console.error('Ошибка загрузки поступлений:', err);
+        setLoadError("Не удалось загрузить поступления");
+      })
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(() => { loadData(); }, []);
+  useEffect(() => { setActivePage(1); }, [search, statusF, accountF]);
 
   const toggleSort = (key: keyof IncomeRow) => {
     if (sortKey === key) setSortDir(d => d === "asc" ? "desc" : "asc");
@@ -155,7 +160,6 @@ export function Income({ onCreateIncome, canCreate = true }: IncomeProps) {
     ? [...filtered].sort((a, b) => {
         let cmp: number;
         if (sortKey === "status") {
-          // Плановое → Подтверждено → Получено (не по алфавиту)
           cmp = (INCOME_STATUS_ORDER[a.status] ?? 99) - (INCOME_STATUS_ORDER[b.status] ?? 99);
         } else {
           cmp = String(a[sortKey]).localeCompare(String(b[sortKey]), "ru", { numeric: true });
@@ -174,20 +178,8 @@ export function Income({ onCreateIncome, canCreate = true }: IncomeProps) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", fontFamily: "Inter, sans-serif" }}>
-
-      {/* ── Filter + action bar ── */}
-      <div
-        style={{
-          background: C.surface,
-          borderBottom: `1px solid ${C.warm}`,
-          padding: "12px 24px",
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-          flexShrink: 0,
-          flexWrap: "wrap",
-        }}
-      >
+      {/* Фильтры и панель действий */}
+      <div style={{ background: C.surface, borderBottom: `1px solid ${C.warm}`, padding: "12px 24px", display: "flex", alignItems: "center", gap: 8, flexShrink: 0, flexWrap: "wrap" }}>
         <div style={{ position: "relative", flexShrink: 0 }}>
           <div style={{ position: "absolute", left: 9, top: "50%", transform: "translateY(-50%)", color: C.warm, display: "flex", pointerEvents: "none" }}>
             <Search size={14} />
@@ -229,7 +221,7 @@ export function Income({ onCreateIncome, canCreate = true }: IncomeProps) {
         </button>
       </div>
 
-      {/* Контекстная панель выбора — объясняет назначение чекбоксов */}
+      {/* Контекстная панель выбора */}
       {selected.size > 0 && (
         <div style={{ background: C.sage10, borderBottom: `1px solid ${C.sage}`, padding: "8px 24px", display: "flex", alignItems: "center", gap: 12, flexShrink: 0 }}>
           <span style={{ fontSize: 13, color: C.sage, fontWeight: 500 }}>
@@ -244,28 +236,27 @@ export function Income({ onCreateIncome, canCreate = true }: IncomeProps) {
         </div>
       )}
 
-      {/* ── Table ── */}
+      {/* Таблица */}
       <div style={{ flex: 1, overflow: "auto", padding: "16px 24px 0" }}>
         <div style={{ background: C.surface, border: `1px solid ${C.warm}`, borderRadius: 8, overflow: "hidden", boxShadow: "0 1px 3px rgba(44,44,30,0.08)", minWidth: 980 }}>
-
-          <div style={{ display: "grid", gridTemplateColumns: COLS, background: C.hdr, borderBottom: `1px solid ${C.warm}` }}>
+          <div style={{ display: "grid", gridTemplateColumns: "40px 56px 1fr 130px 150px 130px 90px 120px 130px 90px", background: C.hdr, borderBottom: `1px solid ${C.warm}` }}>
             <div style={{ padding: "10px 12px", display: "flex", alignItems: "center" }}>
               <CheckBox checked={allSelected} onChange={toggleAll} />
             </div>
-            {([["№",""], ["counterparty","Контрагент"], ["article","Статья"], ["purpose","Назначение"], ["amount","Сумма ↑"], ["date","Дата"], ["account","Счёт"], ["status","Статус"], ["","Действия"]] as [string,string][]).map(([key, label], i) => {
+            {([["","№"], ["counterparty","Контрагент"], ["article","Статья"], ["purpose","Назначение"], ["amount","Сумма ↑"], ["date","Дата"], ["account","Счёт"], ["status","Статус"], ["","Действия"]] as [string,string][]).map(([key, label], i) => {
               const sortable = !!key && key !== "№";
               const active = sortKey === key;
               return (
                 <div key={i} onClick={sortable ? () => toggleSort(key as keyof IncomeRow) : undefined}
                   style={{ padding: "10px 10px", fontSize: 12, fontWeight: 600, color: C.textDk, display: "flex", alignItems: "center", gap: 3, cursor: sortable ? "pointer" : "default", userSelect: "none" }}>
-                  {label || "№"}
+                  {label || ""}
                   {sortable && (active ? (sortDir === "asc" ? <ArrowUp size={11} color={C.sage} /> : <ArrowDown size={11} color={C.sage} />) : <ArrowUpDown size={11} color={C.warm} />)}
                 </div>
               );
             })}
           </div>
 
-          {loading && <TableSkeleton rows={PAGE_SIZE_INC} cols={COLS} />}
+          {loading && <TableSkeleton rows={PAGE_SIZE_INC} cols="40px 56px 1fr 130px 150px 130px 90px 120px 130px 90px" />}
           {!loading && loadError && <TableError message={loadError} onRetry={loadData} />}
           {!loading && !loadError && paged.map((row, idx) => {
             const isHov = hovered === row.id;
@@ -275,38 +266,31 @@ export function Income({ onCreateIncome, canCreate = true }: IncomeProps) {
             const isPlanned = row.status === "planned";
 
             return (
-              <div
-                key={row.id}
-                onMouseEnter={() => setHovered(row.id)}
-                onMouseLeave={() => setHovered(null)}
-                style={{ display: "grid", gridTemplateColumns: COLS, background: bg, borderBottom: `1px solid rgba(192,192,160,0.40)`, transition: "background 0.1s" }}
-              >
+              <div key={row.id} onMouseEnter={() => setHovered(row.id)} onMouseLeave={() => setHovered(null)}
+                style={{ display: "grid", gridTemplateColumns: "40px 56px 1fr 130px 150px 130px 90px 120px 130px 90px", background: bg, borderBottom: `1px solid rgba(192,192,160,0.40)`, transition: "background 0.1s" }}>
                 <div style={{ padding: "10px 12px", display: "flex", alignItems: "center" }}>
                   <CheckBox checked={isSel} onChange={() => toggleRow(row.id)} />
                 </div>
-                <div style={{ padding: "10px 10px", display: "flex", alignItems: "center", fontSize: 12, color: C.textLt, fontVariantNumeric: "tabular-nums" }}>{row.id}</div>
+                <div style={{ padding: "10px 10px", display: "flex", alignItems: "center", fontSize: 12, color: C.textLt, fontVariantNumeric: "tabular-nums" }}>{String(row.id)}</div>
                 <div style={{ padding: "10px 10px", display: "flex", alignItems: "center", fontSize: 13, color: C.textDk, fontWeight: 500, overflow: "hidden" }}>
-                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.counterparty}</span>
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{String(row.counterparty)}</span>
                 </div>
                 <div style={{ padding: "10px 10px", display: "flex", alignItems: "center", fontSize: 12, color: C.textLt, overflow: "hidden" }}>
-                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.article}</span>
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{String(row.article)}</span>
                 </div>
                 <div style={{ padding: "10px 10px", display: "flex", alignItems: "center", fontSize: 12, color: C.textLt, overflow: "hidden" }}>
-                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.purpose}</span>
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{String(row.purpose)}</span>
                 </div>
-                {/* Сумма — зелёная со стрелкой ↑ */}
                 <div style={{ padding: "10px 10px", display: "flex", alignItems: "center", gap: 4, whiteSpace: "nowrap" }}>
                   <span style={{ fontSize: 13, color: C.sage, fontWeight: 600 }}>↑</span>
                   <span style={{ fontSize: 13, fontWeight: 600, color: C.sage, fontVariantNumeric: "tabular-nums" }}>{formatRubFromRub(row.amount)}</span>
                 </div>
-                <div style={{ padding: "10px 10px", display: "flex", alignItems: "center", fontSize: 12, color: C.textLt, whiteSpace: "nowrap" }}>{row.date}</div>
+                <div style={{ padding: "10px 10px", display: "flex", alignItems: "center", fontSize: 12, color: C.textLt, whiteSpace: "nowrap" }}>{String(row.date)}</div>
                 <div style={{ padding: "10px 10px", display: "flex", alignItems: "center", fontSize: 12, color: C.textLt, overflow: "hidden" }}>
-                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.account}</span>
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{String(row.account)}</span>
                 </div>
                 <div style={{ padding: "10px 10px", display: "flex", alignItems: "center" }}>
-                  <span style={{ display: "inline-flex", alignItems: "center", padding: "3px 8px", borderRadius: 4, fontSize: 11, fontWeight: 500, background: sc.bg, color: sc.color, whiteSpace: "nowrap" }}>
-                    {sc.label}
-                  </span>
+                  <span style={{ display: "inline-flex", alignItems: "center", padding: "3px 8px", borderRadius: 4, fontSize: 11, fontWeight: 500, background: sc.bg, color: sc.color, whiteSpace: "nowrap" }}>{sc.label}</span>
                 </div>
                 <div style={{ padding: "10px 8px", display: "flex", alignItems: "center", gap: 4 }}>
                   <IconBtn title="Редактировать" hoverColor={C.sage} onClick={() => setEditTarget(row)}><Edit2 size={14} /></IconBtn>
@@ -323,7 +307,7 @@ export function Income({ onCreateIncome, canCreate = true }: IncomeProps) {
           )}
         </div>
 
-        {/* Summary bar */}
+        {/* Сводка */}
         <div style={{ marginTop: 12, padding: "12px 16px", background: C.surface, border: `1px solid ${C.warm}`, borderRadius: 8, display: "flex", gap: 32, alignItems: "center" }}>
           <SumCard label="Плановые поступления" value="357 000 ₽" color={C.textLt} />
           <div style={{ width: 1, height: 28, background: C.warm }} />
@@ -335,7 +319,7 @@ export function Income({ onCreateIncome, canCreate = true }: IncomeProps) {
         </div>
       </div>
 
-      {/* ── Pagination — same layout as PaymentRequests ── */}
+      {/* Пагинация */}
       <div style={{ padding: "10px 24px 14px", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
         <span style={{ fontSize: 12, color: C.textLt }}>
           {sorted.length > 0 ? `Показано ${(activePage-1)*PAGE_SIZE_INC+1}–${Math.min(activePage*PAGE_SIZE_INC, sorted.length)} из ${sorted.length}` : ""}
@@ -353,7 +337,7 @@ export function Income({ onCreateIncome, canCreate = true }: IncomeProps) {
         </div>
       </div>
 
-      {/* ── Create modal ── */}
+      {/* Модалки */}
       {showCreate && (
         <IncomeFormModal
           initial={null}
@@ -366,7 +350,6 @@ export function Income({ onCreateIncome, canCreate = true }: IncomeProps) {
         />
       )}
 
-      {/* ── Edit modal ── */}
       {editTarget && (
         <IncomeFormModal
           initial={editTarget}
@@ -379,7 +362,6 @@ export function Income({ onCreateIncome, canCreate = true }: IncomeProps) {
         />
       )}
 
-      {/* ── Delete confirm ── */}
       {delTarget && (
         <IncomeConfirmDelete row={delTarget} onConfirm={handleDelete} onCancel={() => setDelTarget(null)} />
       )}
@@ -387,7 +369,7 @@ export function Income({ onCreateIncome, canCreate = true }: IncomeProps) {
   );
 }
 
-/* ── Sub-components ───────────────────────────────── */
+/* ── Вспомогательные компоненты ───────────────────────────────── */
 
 function DropFilter({ value, onChange, placeholder, options, width }: {
   value: string; onChange: (v: string) => void; placeholder: string;
@@ -395,10 +377,10 @@ function DropFilter({ value, onChange, placeholder, options, width }: {
 }) {
   return (
     <div style={{ position: "relative", flexShrink: 0 }}>
-      <select value={value} onChange={e => onChange(e.target.value)}
+      <select value={String(value)} onChange={e => onChange(e.target.value)}
         style={{ width, padding: "7px 26px 7px 10px", border: `1px solid ${C.warm}`, borderRadius: 6, background: C.surface, fontSize: 13, color: value ? C.textDk : C.textLt, outline: "none", appearance: "none", cursor: "pointer", fontFamily: "Inter, sans-serif" }}>
         <option value="">{placeholder}</option>
-        {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+        {options.map(o => <option key={o.value} value={String(o.value)}>{String(o.label)}</option>)}
       </select>
       <div style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", pointerEvents: "none", color: C.textLt, display: "flex" }}>
         <ChevronDown size={13} />
@@ -427,6 +409,26 @@ function IconBtn({ children, title, hoverColor, onClick }: { children: React.Rea
       style={{ background: "none", border: "none", cursor: "pointer", color: hov ? hoverColor : C.olive, padding: 3, display: "flex", borderRadius: 4, transition: "color 0.15s" }}>
       {children}
     </button>
+  );
+}
+
+function PagButton({ label, active, disabled, onClick }: { label: string; active: boolean; disabled?: boolean; onClick: () => void }) {
+  return (
+    <button onClick={disabled ? undefined : onClick} disabled={disabled}
+      style={{ width: 32, height: 32, borderRadius: 6, border: "none", background: active ? C.sage : C.ivory, color: active ? C.surface : disabled ? C.warm : C.textLt, fontSize: 13, fontWeight: active ? 600 : 400, cursor: disabled ? "not-allowed" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "Inter, sans-serif" }}>
+      {label}
+    </button>
+  );
+}
+
+function SumCard({ label, value, color, bold }: { label: string; value: string; color: string; bold?: boolean }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+      <span style={{ fontSize: 11, color: C.textLt }}>{label}</span>
+      <span style={{ fontSize: 14, fontWeight: bold ? 700 : 600, color, fontVariantNumeric: "tabular-nums" }}>
+        ↑ {value}
+      </span>
+    </div>
   );
 }
 
@@ -524,26 +526,6 @@ function IncomeConfirmDelete({ row, onConfirm, onCancel }: { row: IncomeRow; onC
           <button onClick={onCancel} style={{ padding: "9px 16px", borderRadius: 6, background: "transparent", color: C.olive, border: `1.5px solid ${C.warm}`, fontSize: 14, cursor: "pointer", fontFamily: "Inter, sans-serif" }}>Отмена</button>
         </div>
       </div>
-    </div>
-  );
-}
-
-function PagButton({ label, active, disabled, onClick }: { label: string; active: boolean; disabled?: boolean; onClick: () => void }) {
-  return (
-    <button onClick={disabled ? undefined : onClick} disabled={disabled}
-      style={{ width: 32, height: 32, borderRadius: 6, border: "none", background: active ? C.sage : C.ivory, color: active ? C.surface : disabled ? C.warm : C.textLt, fontSize: 13, fontWeight: active ? 600 : 400, cursor: disabled ? "not-allowed" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "Inter, sans-serif" }}>
-      {label}
-    </button>
-  );
-}
-
-function SumCard({ label, value, color, bold }: { label: string; value: string; color: string; bold?: boolean }) {
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-      <span style={{ fontSize: 11, color: C.textLt }}>{label}</span>
-      <span style={{ fontSize: 14, fontWeight: bold ? 700 : 600, color, fontVariantNumeric: "tabular-nums" }}>
-        ↑ {value}
-      </span>
     </div>
   );
 }

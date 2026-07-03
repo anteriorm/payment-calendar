@@ -177,7 +177,6 @@ export function TopBar({ title, onOpenProfile, onOpenSettings }: TopBarProps) {
                 </button>
               ))}
               <div style={{ height: 1, background: C.warm, margin: "4px 0" }} />
-              {/* ── Logout — STUB: замените на DELETE /api/auth/logout ── */}
               <button onClick={() => { setShowProfile(false); logout(); }}
                 style={{ width: "100%", display: "flex", alignItems: "center", gap: 10, padding: "10px 16px", background: "transparent", border: "none", cursor: "pointer", color: C.danger, fontSize: 13, fontFamily: "Inter, sans-serif", textAlign: "left" }}
                 onMouseEnter={e => (e.currentTarget.style.background = C.ivory)}
