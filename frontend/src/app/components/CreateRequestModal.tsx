@@ -2,7 +2,6 @@ import { useState } from "react";
 import { X, Calendar, Search, ChevronDown } from "lucide-react";
 import { useToast } from "./Toast";
 import { C } from "../tokens";
-import { rubToKopecks } from "../utils";
 
 export interface ModalRequestData {
   id?:           number;
@@ -16,9 +15,12 @@ export interface ModalRequestData {
 }
 
 interface CreateRequestModalProps {
-  onClose:      () => void;
-  initialData?: ModalRequestData;
-  onSave?:      (data: ModalRequestData, asDraft: boolean) => void;
+  onClose:        () => void;
+  initialData?:   ModalRequestData;
+  onSave?:        (data: ModalRequestData, asDraft: boolean) => void;
+  accounts?:      { id: number; name: string; type?: string; currency?: string; initial_balance?: number }[];
+  counterparties?: { id: number; name: string; inn?: string; details?: string }[];
+  items?:         { id: number; name: string; type: string }[];
 }
 
 type Priority  = "high" | "medium" | "low";
@@ -30,29 +32,14 @@ const PRIORITIES: { value: Priority; label: string; dot: string; accent: string;
   { value: "low",    label: "Низкий",  dot: C.sage,   accent: C.sage,    bg: C.sage10                 },
 ];
 
-const ACCOUNTS = [
-  { value: "Расчётный №1", label: "Расчётный счёт №1" },
-  { value: "Расчётный №2", label: "Расчётный счёт №2" },
-  { value: "Касса",        label: "Касса"              },
-];
-
-const ARTICLES = [
-  { value: "Аренда офиса",        label: "Аренда офиса"          },
-  { value: "Заработная плата",     label: "Заработная плата"       },
-  { value: "Расходные материалы",  label: "Расходные материалы"    },
-  { value: "Услуги подрядчиков",   label: "Услуги подрядчиков"     },
-  { value: "Налоги и сборы",       label: "Налоги и сборы"         },
-];
-
-const COUNTERPARTIES = [
-  "ООО Поставщик Альфа",
-  "ИП Смирнов А.В.",
-  "АО ТехСервис",
-  "ООО РентаГрупп",
-  "ПАО Энергоресурс",
-];
-
-export function CreateRequestModal({ onClose, initialData, onSave }: CreateRequestModalProps) {
+export function CreateRequestModal({
+  onClose,
+  initialData,
+  onSave,
+  accounts = [],
+  counterparties = [],
+  items = [],
+}: CreateRequestModalProps) {
   const { showToast } = useToast();
   const isEdit = Boolean(initialData?.id);
 
@@ -106,9 +93,14 @@ export function CreateRequestModal({ onClose, initialData, onSave }: CreateReque
     transition: "border 0.15s, box-shadow 0.15s",
   };
 
+  const accountOptions = accounts.map(a => ({ value: a.name, label: a.name }));
+  const counterpartyNames = counterparties.map(c => c.name);
   const filteredCp = counterparty
-    ? COUNTERPARTIES.filter(c => c.toLowerCase().includes(counterparty.toLowerCase()))
-    : COUNTERPARTIES;
+    ? counterpartyNames.filter(c => c.toLowerCase().includes(counterparty.toLowerCase()))
+    : counterpartyNames;
+  const articleOptions = items
+    .filter(i => i.type === 'payment')
+    .map(i => ({ value: i.name, label: i.name }));
 
   const title = isEdit ? `Редактировать заявку № ${initialData!.id}` : "Новая заявка на платёж";
   const submitLabel = isEdit ? "Сохранить изменения" : "Отправить на согласование";
@@ -122,7 +114,7 @@ export function CreateRequestModal({ onClose, initialData, onSave }: CreateReque
         onClick={e => e.stopPropagation()}
         style={{ width: 600, maxHeight: "92vh", background: C.surface, border: `1px solid ${C.warm}`, borderRadius: 12, display: "flex", flexDirection: "column", boxShadow: "0 4px 24px rgba(44,44,30,0.18)" }}
       >
-        {/* ── Header ── */}
+        {/* Header */}
         <div style={{ padding: "20px 24px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
           <h2 style={{ fontSize: 18, fontWeight: 600, color: C.textDk, margin: 0 }}>{title}</h2>
           <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: C.textLt, padding: 4, display: "flex", borderRadius: 4 }}>
@@ -132,13 +124,9 @@ export function CreateRequestModal({ onClose, initialData, onSave }: CreateReque
 
         <div style={{ height: 1, background: C.warm, flexShrink: 0 }} />
 
-        {/* ── Form body ── */}
+        {/* Form body */}
         <div style={{ padding: "20px 24px", overflowY: "auto", display: "flex", flexDirection: "column", gap: 16, flex: 1 }}>
-
-          {/* Сумма */}
           <div>
-            {/* STUB: перед отправкой на реальный API конвертировать rubToKopecks(amount)
-                  Пользователь вводит РУБЛИ, API принимает КОПЕЙКИ */}
             <FieldLabel>Сумма (в рублях)</FieldLabel>
             <div style={{ position: "relative" }}>
               <input type="text" placeholder="0" value={amount} onChange={e => setAmount(e.target.value)}
@@ -149,7 +137,6 @@ export function CreateRequestModal({ onClose, initialData, onSave }: CreateReque
             {errors.amount && <span style={{ fontSize: 11, color: "var(--tm-danger)", marginTop: 4, display: "block" }}>{errors.amount}</span>}
           </div>
 
-          {/* Дата платежа */}
           <div>
             <FieldLabel>Дата платежа</FieldLabel>
             <div style={{ position: "relative" }}>
@@ -163,16 +150,21 @@ export function CreateRequestModal({ onClose, initialData, onSave }: CreateReque
             {errors.date && <span style={{ fontSize: 11, color: "var(--tm-danger)", marginTop: 4, display: "block" }}>{errors.date}</span>}
           </div>
 
-          {/* Счёт */}
           <div>
             <FieldLabel>Счёт</FieldLabel>
-            <SelectField value={account} onChange={setAccount} placeholder="Выберите счёт" options={ACCOUNTS}
-              focusStyle={focusStyle("account")} baseInput={baseInput}
-              onFocus={() => setFocusedField("account")} onBlur={() => setFocusedField(null)} />
+            <SelectField
+              value={account}
+              onChange={setAccount}
+              placeholder="Выберите счёт"
+              options={accountOptions}
+              focusStyle={focusStyle("account")}
+              baseInput={baseInput}
+              onFocus={() => setFocusedField("account")}
+              onBlur={() => setFocusedField(null)}
+            />
             {errors.account && <span style={{ fontSize: 11, color: "var(--tm-danger)", marginTop: 4, display: "block" }}>{errors.account}</span>}
           </div>
 
-          {/* Контрагент */}
           <div style={{ position: "relative" }}>
             <FieldLabel>Контрагент</FieldLabel>
             <div style={{ position: "relative" }}>
@@ -200,15 +192,20 @@ export function CreateRequestModal({ onClose, initialData, onSave }: CreateReque
             )}
           </div>
 
-          {/* Статья расходов */}
           <div>
             <FieldLabel>Статья расходов</FieldLabel>
-            <SelectField value={article} onChange={setArticle} placeholder="Выберите статью" options={ARTICLES}
-              focusStyle={focusStyle("article")} baseInput={baseInput}
-              onFocus={() => setFocusedField("article")} onBlur={() => setFocusedField(null)} />
+            <SelectField
+              value={article}
+              onChange={setArticle}
+              placeholder="Выберите статью"
+              options={articleOptions}
+              focusStyle={focusStyle("article")}
+              baseInput={baseInput}
+              onFocus={() => setFocusedField("article")}
+              onBlur={() => setFocusedField(null)}
+            />
           </div>
 
-          {/* Назначение платежа */}
           <div>
             <FieldLabel>Назначение платежа</FieldLabel>
             <textarea placeholder="Укажите назначение платежа" value={purpose}
@@ -218,7 +215,6 @@ export function CreateRequestModal({ onClose, initialData, onSave }: CreateReque
               style={{ ...baseInput, ...focusStyle("purpose"), resize: "vertical", minHeight: 80 }} />
           </div>
 
-          {/* Приоритет */}
           <div>
             <FieldLabel>Приоритет</FieldLabel>
             <div style={{ display: "flex", gap: 8 }}>
@@ -235,7 +231,6 @@ export function CreateRequestModal({ onClose, initialData, onSave }: CreateReque
             </div>
           </div>
 
-          {/* Повторяющийся платёж */}
           <div>
             <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
               <Toggle checked={recurring} onChange={() => setRecurring(v => !v)} />
@@ -278,12 +273,10 @@ export function CreateRequestModal({ onClose, initialData, onSave }: CreateReque
           </div>
         </div>
 
-        {/* ── Footer ── */}
         <div style={{ borderTop: `1px solid ${C.warm}`, padding: "16px 24px", display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
           <button
             onClick={() => {
               if (!validate()) return;
-              // amount — строка в рублях. При вызове реального API: rubToKopecks(amount)
               const d: ModalRequestData = { id: initialData?.id, amount, date, account, counterparty, article, purpose, priority };
               if (onSave) { onSave(d, false); } else { showToast(isEdit ? "Изменения сохранены" : "Заявка отправлена на согласование", "success"); onClose(); }
             }}

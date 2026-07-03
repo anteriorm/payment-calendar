@@ -8,7 +8,7 @@ import { useToast } from "./Toast";
 import { exportCsv, kopecksToRub, rubToKopecks, formatRubFromRub } from "../utils";
 import { required, positiveAmount, dateRu } from "../utils/validation";
 
-type IncomeStatus = "planned" | "confirmed" | "received";
+type IncomeStatus = "planned" | "confirmed" | "received" | "canceled";
 
 interface IncomeRow {
   id:           number;
@@ -25,9 +25,15 @@ const STATUS_CFG: Record<IncomeStatus, { bg: string; color: string; label: strin
   planned:   { ...C.badge.planned,   label: "Плановое"     },
   confirmed: { ...C.badge.confirmed, label: "Подтверждено" },
   received:  { ...C.badge.received,  label: "Получено"     },
+  canceled:  { ...C.badge.rejected,  label: "Отменено"     },
 };
 
-const INCOME_STATUS_ORDER: Record<IncomeStatus, number> = { planned: 0, confirmed: 1, received: 2 };
+const INCOME_STATUS_ORDER: Record<IncomeStatus, number> = {
+  planned:   0,
+  confirmed: 1,
+  received:  2,
+  canceled:  3,
+};
 
 function ruFmt(n: number): string {
   const s = Math.floor(Math.abs(n)).toString();
@@ -60,6 +66,13 @@ function mapApiToIncome(p: any): IncomeRow {
   const accountName = p.account?.name ?? p.account ?? "";
   const purpose = p.purpose ?? "";
 
+  // Приводим статус к нижнему регистру и убираем лишние пробелы
+  let status = (p.status ?? "planned").toString().toLowerCase().trim();
+  // Если статус недопустимый – заменяем на "planned"
+  if (!["planned", "confirmed", "received", "canceled"].includes(status)) {
+    status = "planned";
+  }
+
   return {
     id:           p.id,
     counterparty: safeString(counterpartyName),
@@ -68,309 +81,11 @@ function mapApiToIncome(p: any): IncomeRow {
     amount:       kopecksToRub(p.amount ?? 0),
     date,
     account:      safeString(accountName),
-    status:       (p.status as IncomeStatus) ?? "planned",
+    status:       status as IncomeStatus,
   };
 }
 
-export function Income({ canCreate = true }: IncomeProps) {
-  const { showToast } = useToast();
-  const [rows,       setRows]       = useState<IncomeRow[]>([]);
-  const [loading,    setLoading]    = useState(true);
-  const [loadError,  setLoadError]  = useState<string | null>(null);
-  const [sortKey,    setSortKey]    = useState<keyof IncomeRow | null>(null);
-  const [sortDir,    setSortDir]    = useState<"asc"|"desc">("asc");
-  const [search,     setSearch]     = useState("");
-  const [statusF,    setStatusF]    = useState("");
-  const [accountF,   setAccountF]   = useState("");
-  const [dateFrom,   setDateFrom]   = useState("");
-  const [dateTo,     setDateTo]     = useState("");
-  const [hovered,    setHovered]    = useState<number | null>(null);
-  const [selected,   setSelected]   = useState<Set<number>>(new Set());
-  const [activePage, setActivePage] = useState(1);
-  const [editTarget, setEditTarget] = useState<IncomeRow | null>(null);
-  const [delTarget,  setDelTarget]  = useState<IncomeRow | null>(null);
-  const [showCreate, setShowCreate] = useState(false);
-
-  const loadData = () => {
-    setLoading(true);
-    setLoadError(null);
-    api.incomes.getAll()
-      .then(data => {
-        console.log('Raw Income API data:', data);
-        const mapped = (data as unknown[]).map(p => mapApiToIncome(p));
-        console.log('Mapped Income data:', mapped);
-        setRows(mapped);
-      })
-      .catch((err) => {
-        console.error('Ошибка загрузки поступлений:', err);
-        setLoadError("Не удалось загрузить поступления");
-      })
-      .finally(() => setLoading(false));
-  };
-
-  useEffect(() => { loadData(); }, []);
-  useEffect(() => { setActivePage(1); }, [search, statusF, accountF]);
-
-  const toggleSort = (key: keyof IncomeRow) => {
-    if (sortKey === key) setSortDir(d => d === "asc" ? "desc" : "asc");
-    else { setSortKey(key); setSortDir("asc"); }
-  };
-
-  const clearFilters = () => {
-    setSearch(""); setStatusF(""); setAccountF(""); setDateFrom(""); setDateTo("");
-  };
-
-  const handleDelete = () => {
-    if (!delTarget) return;
-    setRows(prev => prev.filter(r => r.id !== delTarget.id));
-    showToast(`Поступление № ${delTarget.id} удалено`, "error");
-    setDelTarget(null);
-  };
-
-  const handleExportSelected = () => {
-    const toExport = selected.size > 0
-      ? filtered.filter(r => selected.has(r.id))
-      : filtered;
-    exportCsv(
-      "Поступления.csv",
-      ["№", "Контрагент", "Статья", "Назначение", "Сумма", "Дата", "Счёт", "Статус"],
-      toExport.map(r => [
-        r.id,
-        r.counterparty,
-        r.article,
-        r.purpose,
-        formatRubFromRub(r.amount),
-        r.date,
-        r.account,
-        STATUS_CFG[r.status].label,
-      ]),
-    );
-    showToast(`Поступления.csv скачан (${toExport.length} строк)`, "success");
-    setSelected(new Set());
-  };
-
-  const filtered = rows.filter(r => {
-    if (search   && !r.counterparty.toLowerCase().includes(search.toLowerCase())) return false;
-    if (statusF  && r.status  !== statusF)  return false;
-    if (accountF && r.account !== accountF) return false;
-    return true;
-  });
-
-  const sorted = sortKey
-    ? [...filtered].sort((a, b) => {
-        let cmp: number;
-        if (sortKey === "status") {
-          cmp = (INCOME_STATUS_ORDER[a.status] ?? 99) - (INCOME_STATUS_ORDER[b.status] ?? 99);
-        } else {
-          cmp = String(a[sortKey]).localeCompare(String(b[sortKey]), "ru", { numeric: true });
-        }
-        return sortDir === "asc" ? cmp : -cmp;
-      })
-    : filtered;
-
-  const totalPagesInc = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE_INC));
-  const paged = sorted.slice((activePage - 1) * PAGE_SIZE_INC, activePage * PAGE_SIZE_INC);
-
-  const allSelected = selected.size === paged.length && paged.length > 0;
-  const toggleAll   = () => setSelected(allSelected ? new Set() : new Set(paged.map(r => r.id)));
-  const toggleRow   = (id: number) =>
-    setSelected(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
-
-  return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", fontFamily: "Inter, sans-serif" }}>
-      {/* Фильтры и панель действий */}
-      <div style={{ background: C.surface, borderBottom: `1px solid ${C.warm}`, padding: "12px 24px", display: "flex", alignItems: "center", gap: 8, flexShrink: 0, flexWrap: "wrap" }}>
-        <div style={{ position: "relative", flexShrink: 0 }}>
-          <div style={{ position: "absolute", left: 9, top: "50%", transform: "translateY(-50%)", color: C.warm, display: "flex", pointerEvents: "none" }}>
-            <Search size={14} />
-          </div>
-          <input placeholder="Поиск по контрагенту…" value={search} onChange={e => setSearch(e.target.value)}
-            style={{ width: 210, padding: "7px 10px 7px 30px", border: `1px solid ${C.warm}`, borderRadius: 6, background: C.surface, fontSize: 13, color: C.textDk, outline: "none", fontFamily: "Inter, sans-serif" }} />
-        </div>
-
-        <DropFilter value={statusF} onChange={setStatusF} placeholder="Статус" width={148}
-          options={Object.entries(STATUS_CFG).map(([v, cfg]) => ({ value: v, label: cfg.label }))} />
-        <DropFilter value={accountF} onChange={setAccountF} placeholder="Счёт" width={140}
-          options={[
-            { value: "Расчётный №1", label: "Расчётный №1" },
-            { value: "Расчётный №2", label: "Расчётный №2" },
-            { value: "Касса",        label: "Касса"         },
-          ]} />
-
-        <div style={{ display: "flex", alignItems: "center", gap: 5, flexShrink: 0 }}>
-          <span style={{ fontSize: 12, color: C.textLt }}>с</span>
-          <input type="text" placeholder="дд.мм.гггг" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
-            style={{ width: 96, padding: "7px 10px", border: `1px solid ${C.warm}`, borderRadius: 6, background: C.surface, fontSize: 12, color: C.textDk, outline: "none", fontFamily: "Inter, sans-serif" }} />
-          <span style={{ fontSize: 12, color: C.textLt }}>по</span>
-          <input type="text" placeholder="дд.мм.гггг" value={dateTo} onChange={e => setDateTo(e.target.value)}
-            style={{ width: 96, padding: "7px 10px", border: `1px solid ${C.warm}`, borderRadius: 6, background: C.surface, fontSize: 12, color: C.textDk, outline: "none", fontFamily: "Inter, sans-serif" }} />
-        </div>
-
-        <button onClick={clearFilters} style={{ padding: "6px 12px", background: "transparent", border: `1px solid ${C.warm}`, borderRadius: 6, color: C.textLt, fontSize: 12, cursor: "pointer", fontFamily: "Inter, sans-serif", flexShrink: 0 }}>
-          Сбросить фильтры
-        </button>
-        <div style={{ flex: 1 }} />
-        {canCreate && (
-          <button onClick={() => setShowCreate(true)} style={{ padding: "7px 16px", borderRadius: 6, background: C.sage, color: C.surface, border: "none", fontSize: 13, fontWeight: 500, cursor: "pointer", fontFamily: "Inter, sans-serif", flexShrink: 0 }}>
-            Создать поступление
-          </button>
-        )}
-        <button onClick={handleExportSelected} style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 14px", borderRadius: 6, background: "transparent", color: C.olive, border: `1.5px solid ${C.olive}`, fontSize: 13, fontWeight: 500, cursor: "pointer", fontFamily: "Inter, sans-serif", flexShrink: 0 }}>
-          <FolderOpen size={14} />
-          Импорт из Excel
-        </button>
-      </div>
-
-      {/* Контекстная панель выбора */}
-      {selected.size > 0 && (
-        <div style={{ background: C.sage10, borderBottom: `1px solid ${C.sage}`, padding: "8px 24px", display: "flex", alignItems: "center", gap: 12, flexShrink: 0 }}>
-          <span style={{ fontSize: 13, color: C.sage, fontWeight: 500 }}>
-            Выбрано: {selected.size} {selected.size === 1 ? "запись" : selected.size < 5 ? "записи" : "записей"}
-          </span>
-          <button onClick={handleExportSelected} style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 12px", borderRadius: 6, background: C.sage, color: C.surface, border: "none", fontSize: 12, fontWeight: 500, cursor: "pointer", fontFamily: "Inter, sans-serif" }}>
-            <BarChart2 size={13} /> Выгрузить в Excel
-          </button>
-          <button onClick={() => setSelected(new Set())} style={{ padding: "5px 10px", borderRadius: 6, background: "transparent", color: C.textLt, border: `1px solid ${C.warm}`, fontSize: 12, cursor: "pointer", fontFamily: "Inter, sans-serif" }}>
-            Снять выделение
-          </button>
-        </div>
-      )}
-
-      {/* Таблица */}
-      <div style={{ flex: 1, overflow: "auto", padding: "16px 24px 0" }}>
-        <div style={{ background: C.surface, border: `1px solid ${C.warm}`, borderRadius: 8, overflow: "hidden", boxShadow: "0 1px 3px rgba(44,44,30,0.08)", minWidth: 980 }}>
-          <div style={{ display: "grid", gridTemplateColumns: "40px 56px 1fr 130px 150px 130px 90px 120px 130px 90px", background: C.hdr, borderBottom: `1px solid ${C.warm}` }}>
-            <div style={{ padding: "10px 12px", display: "flex", alignItems: "center" }}>
-              <CheckBox checked={allSelected} onChange={toggleAll} />
-            </div>
-            {([["","№"], ["counterparty","Контрагент"], ["article","Статья"], ["purpose","Назначение"], ["amount","Сумма ↑"], ["date","Дата"], ["account","Счёт"], ["status","Статус"], ["","Действия"]] as [string,string][]).map(([key, label], i) => {
-              const sortable = !!key && key !== "№";
-              const active = sortKey === key;
-              return (
-                <div key={i} onClick={sortable ? () => toggleSort(key as keyof IncomeRow) : undefined}
-                  style={{ padding: "10px 10px", fontSize: 12, fontWeight: 600, color: C.textDk, display: "flex", alignItems: "center", gap: 3, cursor: sortable ? "pointer" : "default", userSelect: "none" }}>
-                  {label || ""}
-                  {sortable && (active ? (sortDir === "asc" ? <ArrowUp size={11} color={C.sage} /> : <ArrowDown size={11} color={C.sage} />) : <ArrowUpDown size={11} color={C.warm} />)}
-                </div>
-              );
-            })}
-          </div>
-
-          {loading && <TableSkeleton rows={PAGE_SIZE_INC} cols="40px 56px 1fr 130px 150px 130px 90px 120px 130px 90px" />}
-          {!loading && loadError && <TableError message={loadError} onRetry={loadData} />}
-          {!loading && !loadError && paged.map((row, idx) => {
-            const isHov = hovered === row.id;
-            const isSel = selected.has(row.id);
-            const bg    = isSel ? C.sage10 : isHov ? C.beige30 : (idx % 2 === 0 ? C.surface : C.ivory50);
-            const sc    = STATUS_CFG[row.status];
-            const isPlanned = row.status === "planned";
-
-            return (
-              <div key={row.id} onMouseEnter={() => setHovered(row.id)} onMouseLeave={() => setHovered(null)}
-                style={{ display: "grid", gridTemplateColumns: "40px 56px 1fr 130px 150px 130px 90px 120px 130px 90px", background: bg, borderBottom: `1px solid rgba(192,192,160,0.40)`, transition: "background 0.1s" }}>
-                <div style={{ padding: "10px 12px", display: "flex", alignItems: "center" }}>
-                  <CheckBox checked={isSel} onChange={() => toggleRow(row.id)} />
-                </div>
-                <div style={{ padding: "10px 10px", display: "flex", alignItems: "center", fontSize: 12, color: C.textLt, fontVariantNumeric: "tabular-nums" }}>{String(row.id)}</div>
-                <div style={{ padding: "10px 10px", display: "flex", alignItems: "center", fontSize: 13, color: C.textDk, fontWeight: 500, overflow: "hidden" }}>
-                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{String(row.counterparty)}</span>
-                </div>
-                <div style={{ padding: "10px 10px", display: "flex", alignItems: "center", fontSize: 12, color: C.textLt, overflow: "hidden" }}>
-                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{String(row.article)}</span>
-                </div>
-                <div style={{ padding: "10px 10px", display: "flex", alignItems: "center", fontSize: 12, color: C.textLt, overflow: "hidden" }}>
-                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{String(row.purpose)}</span>
-                </div>
-                <div style={{ padding: "10px 10px", display: "flex", alignItems: "center", gap: 4, whiteSpace: "nowrap" }}>
-                  <span style={{ fontSize: 13, color: C.sage, fontWeight: 600 }}>↑</span>
-                  <span style={{ fontSize: 13, fontWeight: 600, color: C.sage, fontVariantNumeric: "tabular-nums" }}>{formatRubFromRub(row.amount)}</span>
-                </div>
-                <div style={{ padding: "10px 10px", display: "flex", alignItems: "center", fontSize: 12, color: C.textLt, whiteSpace: "nowrap" }}>{String(row.date)}</div>
-                <div style={{ padding: "10px 10px", display: "flex", alignItems: "center", fontSize: 12, color: C.textLt, overflow: "hidden" }}>
-                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{String(row.account)}</span>
-                </div>
-                <div style={{ padding: "10px 10px", display: "flex", alignItems: "center" }}>
-                  <span style={{ display: "inline-flex", alignItems: "center", padding: "3px 8px", borderRadius: 4, fontSize: 11, fontWeight: 500, background: sc.bg, color: sc.color, whiteSpace: "nowrap" }}>{sc.label}</span>
-                </div>
-                <div style={{ padding: "10px 8px", display: "flex", alignItems: "center", gap: 4 }}>
-                  <IconBtn title="Редактировать" hoverColor={C.sage} onClick={() => setEditTarget(row)}><Edit2 size={14} /></IconBtn>
-                  {isPlanned && <IconBtn title="Удалить" hoverColor={C.danger} onClick={() => setDelTarget(row)}><Trash2 size={14} /></IconBtn>}
-                </div>
-              </div>
-            );
-          })}
-
-          {!loading && !loadError && sorted.length === 0 && (
-            <div style={{ padding: "32px", textAlign: "center", color: C.textLt, fontSize: 13 }}>
-              Нет поступлений по выбранным фильтрам
-            </div>
-          )}
-        </div>
-
-        {/* Сводка */}
-        <div style={{ marginTop: 12, padding: "12px 16px", background: C.surface, border: `1px solid ${C.warm}`, borderRadius: 8, display: "flex", gap: 32, alignItems: "center" }}>
-          <SumCard label="Плановые поступления" value="357 000 ₽" color={C.textLt} />
-          <div style={{ width: 1, height: 28, background: C.warm }} />
-          <SumCard label="Подтверждено" value="465 000 ₽" color="#3D6B3D" />
-          <div style={{ width: 1, height: 28, background: C.warm }} />
-          <SumCard label="Получено" value="770 000 ₽" color={C.sage} />
-          <div style={{ width: 1, height: 28, background: C.warm }} />
-          <SumCard label="Итого" value="1 592 000 ₽" color={C.textDk} bold />
-        </div>
-      </div>
-
-      {/* Пагинация */}
-      <div style={{ padding: "10px 24px 14px", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
-        <span style={{ fontSize: 12, color: C.textLt }}>
-          {sorted.length > 0 ? `Показано ${(activePage-1)*PAGE_SIZE_INC+1}–${Math.min(activePage*PAGE_SIZE_INC, sorted.length)} из ${sorted.length}` : ""}
-        </span>
-        <div style={{ display: "flex", gap: 4 }}>
-          <PagButton label="←" active={false} disabled={activePage <= 1} onClick={() => setActivePage(p => Math.max(1, p-1))} />
-          {Array.from({ length: totalPagesInc }, (_, i) => i + 1)
-            .filter(p => p === 1 || p === totalPagesInc || Math.abs(p - activePage) <= 1)
-            .reduce<(number|"…")[]>((acc, p, i, arr) => { if (i > 0 && (p as number) - (arr[i-1] as number) > 1) acc.push("…"); acc.push(p); return acc; }, [])
-            .map((p, i) => p === "…"
-              ? <span key={`e${i}`} style={{ padding:"0 6px", color:C.textLt, fontSize:13, lineHeight:"32px" }}>…</span>
-              : <PagButton key={p} label={String(p)} active={activePage===p} onClick={() => setActivePage(p as number)} />
-            )}
-          <PagButton label="→" active={false} disabled={activePage >= totalPagesInc} onClick={() => setActivePage(p => Math.min(totalPagesInc, p+1))} />
-        </div>
-      </div>
-
-      {/* Модалки */}
-      {showCreate && (
-        <IncomeFormModal
-          initial={null}
-          onSave={data => {
-            setRows(prev => [{ ...data, id: Math.max(0, ...prev.map(r => r.id)) + 1, status: "planned" as IncomeStatus }, ...prev]);
-            showToast("Поступление создано", "success");
-            setShowCreate(false);
-          }}
-          onClose={() => setShowCreate(false)}
-        />
-      )}
-
-      {editTarget && (
-        <IncomeFormModal
-          initial={editTarget}
-          onSave={data => {
-            setRows(prev => prev.map(r => r.id === editTarget.id ? { ...data, id: r.id, status: r.status } : r));
-            showToast("Поступление обновлено", "success");
-            setEditTarget(null);
-          }}
-          onClose={() => setEditTarget(null)}
-        />
-      )}
-
-      {delTarget && (
-        <IncomeConfirmDelete row={delTarget} onConfirm={handleDelete} onCancel={() => setDelTarget(null)} />
-      )}
-    </div>
-  );
-}
-
-/* ── Вспомогательные компоненты ───────────────────────────────── */
-
+// ----- ВСПОМОГАТЕЛЬНЫЕ КОМПОНЕНТЫ (определены до использования) -----
 function DropFilter({ value, onChange, placeholder, options, width }: {
   value: string; onChange: (v: string) => void; placeholder: string;
   options: { value: string; label: string }[]; width: number;
@@ -432,7 +147,6 @@ function SumCard({ label, value, color, bold }: { label: string; value: string; 
   );
 }
 
-/* ── Income form modal ──────────────────────────────── */
 type IncomeFormData = Omit<IncomeRow, "id" | "status">;
 
 function IncomeFormModal({ initial, onSave, onClose }: {
@@ -526,6 +240,299 @@ function IncomeConfirmDelete({ row, onConfirm, onCancel }: { row: IncomeRow; onC
           <button onClick={onCancel} style={{ padding: "9px 16px", borderRadius: 6, background: "transparent", color: C.olive, border: `1.5px solid ${C.warm}`, fontSize: 14, cursor: "pointer", fontFamily: "Inter, sans-serif" }}>Отмена</button>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ===================== ОСНОВНОЙ КОМПОНЕНТ =====================
+export function Income({ canCreate = true }: IncomeProps) {
+  const { showToast } = useToast();
+  const [rows,       setRows]       = useState<IncomeRow[]>([]);
+  const [loading,    setLoading]    = useState(true);
+  const [loadError,  setLoadError]  = useState<string | null>(null);
+  const [sortKey,    setSortKey]    = useState<keyof IncomeRow | null>(null);
+  const [sortDir,    setSortDir]    = useState<"asc"|"desc">("asc");
+  const [search,     setSearch]     = useState("");
+  const [statusF,    setStatusF]    = useState("");
+  const [accountF,   setAccountF]   = useState("");
+  const [dateFrom,   setDateFrom]   = useState("");
+  const [dateTo,     setDateTo]     = useState("");
+  const [hovered,    setHovered]    = useState<number | null>(null);
+  const [selected,   setSelected]   = useState<Set<number>>(new Set());
+  const [activePage, setActivePage] = useState(1);
+  const [editTarget, setEditTarget] = useState<IncomeRow | null>(null);
+  const [delTarget,  setDelTarget]  = useState<IncomeRow | null>(null);
+  const [showCreate, setShowCreate] = useState(false);
+
+  const loadData = () => {
+    setLoading(true);
+    setLoadError(null);
+    api.incomes.getAll()
+      .then(data => {
+        console.log('Raw Income API data:', data);
+        const mapped = (data as unknown[]).map(p => mapApiToIncome(p));
+        console.log('Mapped Income data:', mapped);
+        setRows(mapped);
+      })
+      .catch((err) => {
+        console.error('Ошибка загрузки поступлений:', err);
+        setLoadError("Не удалось загрузить поступления");
+      })
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(() => { loadData(); }, []);
+  useEffect(() => { setActivePage(1); }, [search, statusF, accountF]);
+
+  const toggleSort = (key: keyof IncomeRow) => {
+    if (sortKey === key) setSortDir(d => d === "asc" ? "desc" : "asc");
+    else { setSortKey(key); setSortDir("asc"); }
+  };
+
+  const clearFilters = () => {
+    setSearch(""); setStatusF(""); setAccountF(""); setDateFrom(""); setDateTo("");
+  };
+
+  const handleDelete = () => {
+    if (!delTarget) return;
+    setRows(prev => prev.filter(r => r.id !== delTarget.id));
+    showToast(`Поступление № ${delTarget.id} удалено`, "error");
+    setDelTarget(null);
+  };
+
+  const handleExportSelected = () => {
+    const toExport = selected.size > 0
+      ? filtered.filter(r => selected.has(r.id))
+      : filtered;
+    exportCsv(
+      "Поступления.csv",
+      ["№", "Контрагент", "Статья", "Назначение", "Сумма", "Дата", "Счёт", "Статус"],
+      toExport.map(r => [
+        r.id,
+        r.counterparty,
+        r.article,
+        r.purpose,
+        formatRubFromRub(r.amount),
+        r.date,
+        r.account,
+        STATUS_CFG[r.status]?.label ?? r.status,
+      ]),
+    );
+    showToast(`Поступления.csv скачан (${toExport.length} строк)`, "success");
+    setSelected(new Set());
+  };
+
+  const filtered = rows.filter(r => {
+    if (search   && !r.counterparty.toLowerCase().includes(search.toLowerCase())) return false;
+    if (statusF  && r.status  !== statusF)  return false;
+    if (accountF && r.account !== accountF) return false;
+    return true;
+  });
+
+  const sorted = sortKey
+    ? [...filtered].sort((a, b) => {
+        let cmp: number;
+        if (sortKey === "status") {
+          cmp = (INCOME_STATUS_ORDER[a.status] ?? 99) - (INCOME_STATUS_ORDER[b.status] ?? 99);
+        } else {
+          cmp = String(a[sortKey]).localeCompare(String(b[sortKey]), "ru", { numeric: true });
+        }
+        return sortDir === "asc" ? cmp : -cmp;
+      })
+    : filtered;
+
+  const totalPagesInc = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE_INC));
+  const paged = sorted.slice((activePage - 1) * PAGE_SIZE_INC, activePage * PAGE_SIZE_INC);
+
+  const allSelected = selected.size === paged.length && paged.length > 0;
+  const toggleAll   = () => setSelected(allSelected ? new Set() : new Set(paged.map(r => r.id)));
+  const toggleRow   = (id: number) =>
+    setSelected(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", fontFamily: "Inter, sans-serif" }}>
+      <div style={{ background: C.surface, borderBottom: `1px solid ${C.warm}`, padding: "12px 24px", display: "flex", alignItems: "center", gap: 8, flexShrink: 0, flexWrap: "wrap" }}>
+        <div style={{ position: "relative", flexShrink: 0 }}>
+          <div style={{ position: "absolute", left: 9, top: "50%", transform: "translateY(-50%)", color: C.warm, display: "flex", pointerEvents: "none" }}>
+            <Search size={14} />
+          </div>
+          <input placeholder="Поиск по контрагенту…" value={search} onChange={e => setSearch(e.target.value)}
+            style={{ width: 210, padding: "7px 10px 7px 30px", border: `1px solid ${C.warm}`, borderRadius: 6, background: C.surface, fontSize: 13, color: C.textDk, outline: "none", fontFamily: "Inter, sans-serif" }} />
+        </div>
+
+        <DropFilter value={statusF} onChange={setStatusF} placeholder="Статус" width={148}
+          options={Object.entries(STATUS_CFG).map(([v, cfg]) => ({ value: v, label: cfg.label }))} />
+        <DropFilter value={accountF} onChange={setAccountF} placeholder="Счёт" width={140}
+          options={[
+            { value: "Расчётный №1", label: "Расчётный №1" },
+            { value: "Расчётный №2", label: "Расчётный №2" },
+            { value: "Касса",        label: "Касса"         },
+          ]} />
+
+        <div style={{ display: "flex", alignItems: "center", gap: 5, flexShrink: 0 }}>
+          <span style={{ fontSize: 12, color: C.textLt }}>с</span>
+          <input type="text" placeholder="дд.мм.гггг" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
+            style={{ width: 96, padding: "7px 10px", border: `1px solid ${C.warm}`, borderRadius: 6, background: C.surface, fontSize: 12, color: C.textDk, outline: "none", fontFamily: "Inter, sans-serif" }} />
+          <span style={{ fontSize: 12, color: C.textLt }}>по</span>
+          <input type="text" placeholder="дд.мм.гггг" value={dateTo} onChange={e => setDateTo(e.target.value)}
+            style={{ width: 96, padding: "7px 10px", border: `1px solid ${C.warm}`, borderRadius: 6, background: C.surface, fontSize: 12, color: C.textDk, outline: "none", fontFamily: "Inter, sans-serif" }} />
+        </div>
+
+        <button onClick={clearFilters} style={{ padding: "6px 12px", background: "transparent", border: `1px solid ${C.warm}`, borderRadius: 6, color: C.textLt, fontSize: 12, cursor: "pointer", fontFamily: "Inter, sans-serif", flexShrink: 0 }}>
+          Сбросить фильтры
+        </button>
+        <div style={{ flex: 1 }} />
+        {canCreate && (
+          <button onClick={() => setShowCreate(true)} style={{ padding: "7px 16px", borderRadius: 6, background: C.sage, color: C.surface, border: "none", fontSize: 13, fontWeight: 500, cursor: "pointer", fontFamily: "Inter, sans-serif", flexShrink: 0 }}>
+            Создать поступление
+          </button>
+        )}
+        <button onClick={handleExportSelected} style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 14px", borderRadius: 6, background: "transparent", color: C.olive, border: `1.5px solid ${C.olive}`, fontSize: 13, fontWeight: 500, cursor: "pointer", fontFamily: "Inter, sans-serif", flexShrink: 0 }}>
+          <FolderOpen size={14} />
+          Импорт из Excel
+        </button>
+      </div>
+
+      {selected.size > 0 && (
+        <div style={{ background: C.sage10, borderBottom: `1px solid ${C.sage}`, padding: "8px 24px", display: "flex", alignItems: "center", gap: 12, flexShrink: 0 }}>
+          <span style={{ fontSize: 13, color: C.sage, fontWeight: 500 }}>
+            Выбрано: {selected.size} {selected.size === 1 ? "запись" : selected.size < 5 ? "записи" : "записей"}
+          </span>
+          <button onClick={handleExportSelected} style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 12px", borderRadius: 6, background: C.sage, color: C.surface, border: "none", fontSize: 12, fontWeight: 500, cursor: "pointer", fontFamily: "Inter, sans-serif" }}>
+            <BarChart2 size={13} /> Выгрузить в Excel
+          </button>
+          <button onClick={() => setSelected(new Set())} style={{ padding: "5px 10px", borderRadius: 6, background: "transparent", color: C.textLt, border: `1px solid ${C.warm}`, fontSize: 12, cursor: "pointer", fontFamily: "Inter, sans-serif" }}>
+            Снять выделение
+          </button>
+        </div>
+      )}
+
+      <div style={{ flex: 1, overflow: "auto", padding: "16px 24px 0" }}>
+        <div style={{ background: C.surface, border: `1px solid ${C.warm}`, borderRadius: 8, overflow: "hidden", boxShadow: "0 1px 3px rgba(44,44,30,0.08)", minWidth: 980 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "40px 56px 1fr 130px 150px 130px 90px 120px 130px 90px", background: C.hdr, borderBottom: `1px solid ${C.warm}` }}>
+            <div style={{ padding: "10px 12px", display: "flex", alignItems: "center" }}>
+              <CheckBox checked={allSelected} onChange={toggleAll} />
+            </div>
+            {([["","№"], ["counterparty","Контрагент"], ["article","Статья"], ["purpose","Назначение"], ["amount","Сумма ↑"], ["date","Дата"], ["account","Счёт"], ["status","Статус"], ["","Действия"]] as [string,string][]).map(([key, label], i) => {
+              const sortable = !!key && key !== "№";
+              const active = sortKey === key;
+              return (
+                <div key={i} onClick={sortable ? () => toggleSort(key as keyof IncomeRow) : undefined}
+                  style={{ padding: "10px 10px", fontSize: 12, fontWeight: 600, color: C.textDk, display: "flex", alignItems: "center", gap: 3, cursor: sortable ? "pointer" : "default", userSelect: "none" }}>
+                  {label || ""}
+                  {sortable && (active ? (sortDir === "asc" ? <ArrowUp size={11} color={C.sage} /> : <ArrowDown size={11} color={C.sage} />) : <ArrowUpDown size={11} color={C.warm} />)}
+                </div>
+              );
+            })}
+          </div>
+
+          {loading && <TableSkeleton rows={PAGE_SIZE_INC} cols="40px 56px 1fr 130px 150px 130px 90px 120px 130px 90px" />}
+          {!loading && loadError && <TableError message={loadError} onRetry={loadData} />}
+          {!loading && !loadError && paged.map((row, idx) => {
+            const isHov = hovered === row.id;
+            const isSel = selected.has(row.id);
+            const bg    = isSel ? C.sage10 : isHov ? C.beige30 : (idx % 2 === 0 ? C.surface : C.ivory50);
+            const sc    = STATUS_CFG[row.status] || { bg: C.ivory, color: C.textLt, label: row.status };
+
+            return (
+              <div key={row.id} onMouseEnter={() => setHovered(row.id)} onMouseLeave={() => setHovered(null)}
+                style={{ display: "grid", gridTemplateColumns: "40px 56px 1fr 130px 150px 130px 90px 120px 130px 90px", background: bg, borderBottom: `1px solid rgba(192,192,160,0.40)`, transition: "background 0.1s" }}>
+                <div style={{ padding: "10px 12px", display: "flex", alignItems: "center" }}>
+                  <CheckBox checked={isSel} onChange={() => toggleRow(row.id)} />
+                </div>
+                <div style={{ padding: "10px 10px", display: "flex", alignItems: "center", fontSize: 12, color: C.textLt, fontVariantNumeric: "tabular-nums" }}>{String(row.id)}</div>
+                <div style={{ padding: "10px 10px", display: "flex", alignItems: "center", fontSize: 13, color: C.textDk, fontWeight: 500, overflow: "hidden" }}>
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{String(row.counterparty)}</span>
+                </div>
+                <div style={{ padding: "10px 10px", display: "flex", alignItems: "center", fontSize: 12, color: C.textLt, overflow: "hidden" }}>
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{String(row.article)}</span>
+                </div>
+                <div style={{ padding: "10px 10px", display: "flex", alignItems: "center", fontSize: 12, color: C.textLt, overflow: "hidden" }}>
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{String(row.purpose)}</span>
+                </div>
+                <div style={{ padding: "10px 10px", display: "flex", alignItems: "center", gap: 4, whiteSpace: "nowrap" }}>
+                  <span style={{ fontSize: 13, color: C.sage, fontWeight: 600 }}>↑</span>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: C.sage, fontVariantNumeric: "tabular-nums" }}>{formatRubFromRub(row.amount)}</span>
+                </div>
+                <div style={{ padding: "10px 10px", display: "flex", alignItems: "center", fontSize: 12, color: C.textLt, whiteSpace: "nowrap" }}>{String(row.date)}</div>
+                <div style={{ padding: "10px 10px", display: "flex", alignItems: "center", fontSize: 12, color: C.textLt, overflow: "hidden" }}>
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{String(row.account)}</span>
+                </div>
+                <div style={{ padding: "10px 10px", display: "flex", alignItems: "center" }}>
+                  <span style={{ display: "inline-flex", alignItems: "center", padding: "3px 8px", borderRadius: 4, fontSize: 11, fontWeight: 500, background: sc.bg, color: sc.color, whiteSpace: "nowrap" }}>
+                    {sc.label}
+                  </span>
+                </div>
+                <div style={{ padding: "10px 8px", display: "flex", alignItems: "center", gap: 4 }}>
+                  <IconBtn title="Редактировать" hoverColor={C.sage} onClick={() => setEditTarget(row)}><Edit2 size={14} /></IconBtn>
+                  {isPlanned && <IconBtn title="Удалить" hoverColor={C.danger} onClick={() => setDelTarget(row)}><Trash2 size={14} /></IconBtn>}
+                </div>
+              </div>
+            );
+          })}
+
+          {!loading && !loadError && sorted.length === 0 && (
+            <div style={{ padding: "32px", textAlign: "center", color: C.textLt, fontSize: 13 }}>
+              Нет поступлений по выбранным фильтрам
+            </div>
+          )}
+        </div>
+
+        <div style={{ marginTop: 12, padding: "12px 16px", background: C.surface, border: `1px solid ${C.warm}`, borderRadius: 8, display: "flex", gap: 32, alignItems: "center" }}>
+          <SumCard label="Плановые поступления" value="357 000 ₽" color={C.textLt} />
+          <div style={{ width: 1, height: 28, background: C.warm }} />
+          <SumCard label="Подтверждено" value="465 000 ₽" color="#3D6B3D" />
+          <div style={{ width: 1, height: 28, background: C.warm }} />
+          <SumCard label="Получено" value="770 000 ₽" color={C.sage} />
+          <div style={{ width: 1, height: 28, background: C.warm }} />
+          <SumCard label="Итого" value="1 592 000 ₽" color={C.textDk} bold />
+        </div>
+      </div>
+
+      <div style={{ padding: "10px 24px 14px", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
+        <span style={{ fontSize: 12, color: C.textLt }}>
+          {sorted.length > 0 ? `Показано ${(activePage-1)*PAGE_SIZE_INC+1}–${Math.min(activePage*PAGE_SIZE_INC, sorted.length)} из ${sorted.length}` : ""}
+        </span>
+        <div style={{ display: "flex", gap: 4 }}>
+          <PagButton label="←" active={false} disabled={activePage <= 1} onClick={() => setActivePage(p => Math.max(1, p-1))} />
+          {Array.from({ length: totalPagesInc }, (_, i) => i + 1)
+            .filter(p => p === 1 || p === totalPagesInc || Math.abs(p - activePage) <= 1)
+            .reduce<(number|"…")[]>((acc, p, i, arr) => { if (i > 0 && (p as number) - (arr[i-1] as number) > 1) acc.push("…"); acc.push(p); return acc; }, [])
+            .map((p, i) => p === "…"
+              ? <span key={`e${i}`} style={{ padding:"0 6px", color:C.textLt, fontSize:13, lineHeight:"32px" }}>…</span>
+              : <PagButton key={p} label={String(p)} active={activePage===p} onClick={() => setActivePage(p as number)} />
+            )}
+          <PagButton label="→" active={false} disabled={activePage >= totalPagesInc} onClick={() => setActivePage(p => Math.min(totalPagesInc, p+1))} />
+        </div>
+      </div>
+
+      {showCreate && (
+        <IncomeFormModal
+          initial={null}
+          onSave={data => {
+            setRows(prev => [{ ...data, id: Math.max(0, ...prev.map(r => r.id)) + 1, status: "planned" as IncomeStatus }, ...prev]);
+            showToast("Поступление создано", "success");
+            setShowCreate(false);
+          }}
+          onClose={() => setShowCreate(false)}
+        />
+      )}
+
+      {editTarget && (
+        <IncomeFormModal
+          initial={editTarget}
+          onSave={data => {
+            setRows(prev => prev.map(r => r.id === editTarget.id ? { ...data, id: r.id, status: r.status } : r));
+            showToast("Поступление обновлено", "success");
+            setEditTarget(null);
+          }}
+          onClose={() => setEditTarget(null)}
+        />
+      )}
+
+      {delTarget && (
+        <IncomeConfirmDelete row={delTarget} onConfirm={handleDelete} onCancel={() => setDelTarget(null)} />
+      )}
     </div>
   );
 }

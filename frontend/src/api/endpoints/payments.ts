@@ -12,47 +12,61 @@ export interface PaymentsFilter {
   date_to?:         string;
 }
 
-// Интерфейс ответа бэкенда (с вложенными объектами)
 interface ApiPayment {
   id: number;
-  amount: number;                   // в копейках
+  amount: number;
   planned_date: string;
-  account: { id: number; name: string };
-  counterparty: { id: number; name: string };
-  item: { id: number; name: string; type: string };
+  account?: { id: number; name: string };
+  counterparty?: { id: number; name: string };
+  item?: { id: number; name: string; type: string };
+  created_by?: { id: number; name: string };
+  account_id?: number;
+  account_name?: string;
+  counterparty_id?: number;
+  counterparty_name?: string;
+  item_id?: number;
+  item_name?: string;
+  created_by_id?: number;
+  created_by_name?: string;
   purpose: string | null;
   priority: "high" | "medium" | "low";
   status: PaymentStatus;
-  created_by: { id: number; name: string };
   registry_id: number | null;
   created_at: string;
   updated_at: string;
 }
 
-// Маппер: преобразует ответ бэкенда в формат, который ожидает фронт
 function mapApiPayment(api: ApiPayment): Payment {
+  const accountId = api.account?.id ?? api.account_id ?? 0;
+  const accountName = api.account?.name ?? api.account_name ?? "";
+  const counterpartyId = api.counterparty?.id ?? api.counterparty_id ?? 0;
+  const counterpartyName = api.counterparty?.name ?? api.counterparty_name ?? "";
+  const itemId = api.item?.id ?? api.item_id ?? 0;
+  const itemName = api.item?.name ?? api.item_name ?? "";
+  const createdById = api.created_by?.id ?? api.created_by_id ?? 0;
+  const createdByName = api.created_by?.name ?? api.created_by_name ?? "";
+
   return {
     id: api.id,
-    amount: kopecksToRub(api.amount),          // копейки → рубли
+    amount: kopecksToRub(api.amount),
     planned_date: api.planned_date,
-    account_id: api.account.id,
-    account_name: api.account.name,
-    counterparty_id: api.counterparty.id,
-    counterparty: api.counterparty.name,
-    item_id: api.item.id,
-    item: api.item.name,
+    account_id: accountId,
+    account_name: accountName,
+    counterparty_id: counterpartyId,
+    counterparty: counterpartyName,
+    item_id: itemId,
+    item: itemName,
     purpose: api.purpose || "",
     priority: api.priority,
     status: api.status,
-    created_by: api.created_by.id,
-    creator_name: api.created_by.name,
+    created_by: createdById,
+    creator_name: createdByName,
     registry_id: api.registry_id,
     created_at: api.created_at,
     updated_at: api.updated_at,
   };
 }
 
-// Интерфейс для создания/обновления (плоские поля, суммы в рублях)
 export type PaymentCreateData = Omit<Payment, "id" | "status" | "created_at" | "updated_at">;
 
 let store: Payment[] = [...mockPayments];
@@ -67,7 +81,6 @@ const real = {
       .then(r => mapApiPayment(r.data)),
 
   create: (data: Omit<Payment, "id" | "status" | "created_at" | "updated_at">) => {
-    // Конвертируем суммы в копейки и убираем строковые названия
     const payload = {
       amount: rubToKopecks(data.amount),
       planned_date: data.planned_date,
@@ -76,10 +89,13 @@ const real = {
       item_id: data.item_id,
       purpose: data.purpose,
       priority: data.priority,
-      // status не передаём, бэкенд установит draft по умолчанию
     };
+    console.log("📤 Создание платежа, payload:", payload);
     return client.post<ApiPayment>("/payments", payload)
-      .then(r => mapApiPayment(r.data));
+      .then(r => {
+        console.log("📥 Ответ сервера (создание):", r.data);
+        return mapApiPayment(r.data);
+      });
   },
 
   update: (id: number, data: Partial<Payment>) => {
@@ -92,8 +108,12 @@ const real = {
     if (data.purpose !== undefined) payload.purpose = data.purpose;
     if (data.priority !== undefined) payload.priority = data.priority;
     if (data.status !== undefined) payload.status = data.status;
+    console.log("📤 Обновление платежа, payload:", payload);
     return client.put<ApiPayment>(`/payments/${id}`, payload)
-      .then(r => mapApiPayment(r.data));
+      .then(r => {
+        console.log("📥 Ответ сервера (обновление):", r.data);
+        return mapApiPayment(r.data);
+      });
   },
 
   delete: (id: number) => client.delete(`/payments/${id}`).then(r => r.data),
@@ -115,7 +135,6 @@ const real = {
       .then(r => mapApiPayment(r.data)),
 };
 
-// ---------- Мок-реализация (без изменений, использует store) ----------
 const setStatus = (id: number, status: PaymentStatus): Payment => {
   store = store.map(p => p.id === id ? { ...p, status } : p);
   return store.find(p => p.id === id)!;
