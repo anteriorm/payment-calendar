@@ -15,8 +15,10 @@ class ItemController extends Controller
     public function store(Request $request)
     {
         $validated = $request->validate([
+            'code' => 'required|string|max:20',
             'name' => 'required|string|max:255',
             'type' => 'required|in:income,payment',
+            'group' => 'nullable|string|max:255',
         ]);
 
         $item = Item::create($validated);
@@ -31,8 +33,10 @@ class ItemController extends Controller
     public function update(Request $request, Item $item)
     {
         $validated = $request->validate([
+            'code' => 'sometimes|string|max:20',
             'name' => 'sometimes|string|max:255',
             'type' => 'sometimes|in:income,payment',
+            'group' => 'sometimes|nullable|string|max:255',
         ]);
 
         $item->update($validated);

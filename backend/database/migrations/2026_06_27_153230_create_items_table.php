@@ -10,8 +10,10 @@ return new class extends Migration
     {
         Schema::create('items', function (Blueprint $table) {
             $table->id();
+            $table->string('code', 20);
             $table->string('name');
             $table->enum('type', ['income', 'payment']);
+            $table->string('group')->nullable();
             $table->timestamps();
         });
     }

@@ -8,9 +8,27 @@ use Illuminate\Http\Request;
 
 class RegistryController extends Controller
 {
+    private function formatRegistry(Registry $registry): array
+    {
+        return [
+            'id' => $registry->id,
+            'registry_date' => $registry->registry_date?->toDateString() ?? '',
+            'status' => $registry->status,
+            'payment_ids' => $registry->payments->pluck('id')->toArray(),
+            'total_amount' => $registry->payments->sum('amount'),
+            'created_by' => $registry->creator?->name ?? '',
+            'approved_by' => $registry->approver?->name ?? null,
+            'created_at' => $registry->created_at?->toIso8601String() ?? '',
+        ];
+    }
+
     public function index()
     {
-        $registries = Registry::with(['payments', 'creator', 'approver'])->get();
+        $registries = Registry::with(['payments', 'creator', 'approver'])
+            ->orderBy('created_at', 'desc')
+            ->get()
+            ->map(fn($r) => $this->formatRegistry($r));
+
         return response()->json($registries);
     }
 
@@ -49,14 +67,27 @@ class RegistryController extends Controller
             $payment->save();
         }
 
-        $registry->load('payments');
-        return response()->json($registry, 201);
+        $registry->load(['payments', 'creator', 'approver']);
+        return response()->json($this->formatRegistry($registry), 201);
     }
 
     public function show(Registry $registry)
     {
-        $registry->load(['payments', 'creator', 'approver']);
-        return response()->json($registry);
+        $registry->load(['payments.account', 'payments.counterparty', 'payments.item', 'creator', 'approver']);
+
+        $result = $this->formatRegistry($registry);
+        $result['payments'] = $registry->payments->map(fn($p) => [
+            'id' => $p->id,
+            'counterparty' => $p->counterparty?->name ?? '',
+            'article' => $p->item?->name ?? '',
+            'amount' => $p->amount,
+            'account' => $p->account?->name ?? '',
+            'date' => $p->planned_date?->toDateString() ?? '',
+            'priority' => $p->priority,
+            'status' => $p->status,
+        ]);
+
+        return response()->json($result);
     }
 
     public function pay(Registry $registry)
@@ -74,12 +105,13 @@ class RegistryController extends Controller
             $payment->save();
         }
 
-        return response()->json(['message' => 'Реестр оплачен', 'registry' => $registry]);
+        $registry->load(['payments', 'creator', 'approver']);
+        return response()->json(['message' => 'Реестр оплачен', 'registry' => $this->formatRegistry($registry)]);
     }
 
     public function export(Registry $registry)
     {
-        $registry->load('payments');
+        $registry->load(['payments.account', 'payments.counterparty', 'payments.item']);
 
         $rows = [];
         $rows[] = ['ID', 'Дата', 'Контрагент', 'Сумма', 'Счёт', 'Статья', 'Назначение', 'Статус'];

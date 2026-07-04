@@ -6,15 +6,36 @@ use App\Models\Payment;
 use Illuminate\Http\Request;
 use App\Models\Approval;
 use Illuminate\Support\Facades\Auth;
+use Carbon\Carbon;
 
 class PaymentController extends Controller
 {
-    public function index()
+    public function index(Request $request)
     {
-        $payments = Payment::with(['account', 'counterparty', 'item', 'creator'])
-            ->orderBy('planned_date', 'asc')
-            ->get();
-        return response()->json($payments);
+        $query = Payment::with(['account', 'counterparty', 'item', 'creator'])
+            ->orderBy('planned_date', 'asc');
+
+        if ($request->filled('status')) {
+            $query->where('status', $request->status);
+        }
+
+        if ($request->filled('account_id')) {
+            $query->where('account_id', $request->account_id);
+        }
+
+        if ($request->filled('counterparty_id')) {
+            $query->where('counterparty_id', $request->counterparty_id);
+        }
+
+        if ($request->filled('date_from')) {
+            $query->where('planned_date', '>=', $request->date_from);
+        }
+
+        if ($request->filled('date_to')) {
+            $query->where('planned_date', '<=', $request->date_to);
+        }
+
+        return response()->json($query->get());
     }
 
     public function store(Request $request)
@@ -28,12 +49,43 @@ class PaymentController extends Controller
             'purpose' => 'nullable|string',
             'priority' => 'required|in:high,medium,low',
             'status' => 'sometimes|in:draft,pending,approved,rejected,in_registry,paid',
+            'recurring' => 'sometimes|boolean',
+            'recurring_frequency' => 'sometimes|in:monthly,weekly,quarterly',
         ]);
 
         $validated['created_by'] = Auth::id();
         $validated['status'] = $validated['status'] ?? 'draft';
 
         $payment = Payment::create($validated);
+
+        // Создаём повторяющиеся платежи на 6 месяцев вперёд
+        if (!empty($validated['recurring']) && !empty($validated['recurring_frequency'])) {
+            $freq = $validated['recurring_frequency'];
+            $date = Carbon::parse($validated['planned_date']);
+            for ($i = 1; $i <= 6; $i++) {
+                $next = match ($freq) {
+                    'weekly' => $date->copy()->addWeeks($i),
+                    'monthly' => $date->copy()->addMonths($i),
+                    'quarterly' => $date->copy()->addMonths($i * 3),
+                };
+                Payment::create([
+                    'amount' => $validated['amount'],
+                    'planned_date' => $next->toDateString(),
+                    'account_id' => $validated['account_id'],
+                    'counterparty_id' => $validated['counterparty_id'],
+                    'item_id' => $validated['item_id'],
+                    'purpose' => ($validated['purpose'] ?? '') . ' (повтор)',
+                    'priority' => $validated['priority'],
+                    'status' => 'draft',
+                    'created_by' => Auth::id(),
+                    'recurring' => true,
+                    'recurring_frequency' => $freq,
+                ]);
+            }
+        }
+
+        $payment->load(['account', 'counterparty', 'item', 'creator']);
+
         return response()->json($payment, 201);
     }
 
@@ -45,7 +97,6 @@ class PaymentController extends Controller
 
     public function update(Request $request, Payment $payment)
     {
-        // Только черновик можно редактировать
         if ($payment->status !== 'draft') {
             return response()->json(['message' => 'Редактирование разрешено только для черновиков'], 403);
         }
@@ -61,12 +112,13 @@ class PaymentController extends Controller
         ]);
 
         $payment->update($validated);
+        $payment->load(['account', 'counterparty', 'item', 'creator']);
+
         return response()->json($payment);
     }
 
     public function destroy(Payment $payment)
     {
-        // Только черновик можно удалить
         if ($payment->status !== 'draft') {
             return response()->json(['message' => 'Удаление разрешено только для черновиков'], 403);
         }
@@ -85,6 +137,7 @@ class PaymentController extends Controller
 
         $payment->status = 'pending';
         $payment->save();
+        $payment->load(['account', 'counterparty', 'item', 'creator']);
 
         return response()->json(['message' => 'Заявка отправлена на согласование', 'payment' => $payment]);
     }
@@ -95,7 +148,6 @@ class PaymentController extends Controller
             return response()->json(['message' => 'Только заявка в статусе "на согласовании" может быть утверждена'], 403);
         }
 
-        // Проверка роли: только менеджер или админ
         if (!in_array(Auth::user()->role, ['manager', 'admin'])) {
             return response()->json(['message' => 'У вас нет прав утверждать'], 403);
         }
@@ -109,6 +161,8 @@ class PaymentController extends Controller
             'decision' => 'approved',
             'comment' => $request->comment,
         ]);
+
+        $payment->load(['account', 'counterparty', 'item', 'creator']);
 
         return response()->json(['message' => 'Заявка утверждена', 'payment' => $payment]);
     }
@@ -133,6 +187,8 @@ class PaymentController extends Controller
             'comment' => $request->comment,
         ]);
 
+        $payment->load(['account', 'counterparty', 'item', 'creator']);
+
         return response()->json(['message' => 'Заявка отклонена', 'payment' => $payment]);
     }
 
@@ -144,13 +200,13 @@ class PaymentController extends Controller
             'planned_date' => 'required|date',
         ]);
 
-        // Можно переносить только если статус draft, pending, approved (не in_registry, paid, rejected)
         if (!in_array($payment->status, ['draft', 'pending', 'approved'])) {
             return response()->json(['message' => 'Этот платёж нельзя перенести'], 403);
         }
 
         $payment->planned_date = $request->planned_date;
         $payment->save();
+        $payment->load(['account', 'counterparty', 'item', 'creator']);
 
         return response()->json(['message' => 'Дата платежа изменена', 'payment' => $payment]);
     }

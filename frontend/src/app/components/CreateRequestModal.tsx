@@ -44,7 +44,7 @@ export function CreateRequestModal({
   const isEdit = Boolean(initialData?.id);
 
   const [amount,       setAmount]       = useState(initialData?.amount       ?? "");
-  const [date,         setDate]         = useState(initialData?.date         ?? "26.06.2026");
+  const [date,         setDate]         = useState(initialData?.date         ?? (() => { const d = new Date(); return `${String(d.getDate()).padStart(2,"0")}.${String(d.getMonth()+1).padStart(2,"0")}.${d.getFullYear()}`; })());
   const [account,      setAccount]      = useState(initialData?.account      ?? "");
   const [counterparty, setCounterparty] = useState(initialData?.counterparty ?? "");
   const [cpOpen,       setCpOpen]       = useState(false);

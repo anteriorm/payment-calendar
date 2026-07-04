@@ -145,24 +145,18 @@ function mapApiToIncome(p: any): IncomeRow {
 }
 
 // ----- Обратный маппер для отправки на API -----
-function mapIncomeToApi(row: IncomeFormData): any {
-  const accountMap: Record<string, number> = {
-    "Расчётный №1": 1,
-    "Расчётный счёт №1": 1,
-    "Расчётный №2": 2,
-    "Расчётный счёт №2": 2,
-    "Касса": 3,
-  };
-  // Нужно найти ID счёта, контрагента и статьи по имени.
-  // Пока используем заглушки – позже будем передавать из загруженных списков.
+function mapIncomeToApi(row: IncomeFormData, accounts: any[], counterparties: any[], items: any[]): any {
+  const account = accounts.find(a => a.name === row.account);
+  const counterparty = counterparties.find(cp => cp.name === row.counterparty);
+  const item = items.find(it => it.name === row.article);
   return {
     amount: rubToKopecks(row.amount),
     planned_date: row.date.split(".").reverse().join("-"),
-    account_id: accountMap[row.account] || 1,
-    counterparty_id: 1, // TODO: заменить на реальный ID
-    item_id: 1,         // TODO: заменить на реальный ID
+    account_id: account?.id || accounts[0]?.id || 1,
+    counterparty_id: counterparty?.id || counterparties[0]?.id || 1,
+    item_id: item?.id || items[0]?.id || 1,
     purpose: row.purpose,
-    status: "planned", // при создании всегда planned
+    status: "planned",
   };
 }
 
@@ -242,7 +236,7 @@ export function Income({ canCreate = true }: IncomeProps) {
 
   // ----- CRUD через API -----
   const handleCreate = async (data: IncomeFormData) => {
-    const payload = mapIncomeToApi(data);
+    const payload = mapIncomeToApi(data, accounts, counterparties, items);
     try {
       await api.incomes.create(payload);
       showToast("Поступление создано", "success");
@@ -255,7 +249,7 @@ export function Income({ canCreate = true }: IncomeProps) {
   };
 
   const handleUpdate = async (id: number, data: IncomeFormData) => {
-    const payload = mapIncomeToApi(data);
+    const payload = mapIncomeToApi(data, accounts, counterparties, items);
     try {
       await api.incomes.update(id, payload);
       showToast("Поступление обновлено", "success");
@@ -478,13 +472,13 @@ export function Income({ canCreate = true }: IncomeProps) {
 
         {/* Сводка */}
         <div style={{ marginTop: 12, padding: "12px 16px", background: C.surface, border: `1px solid ${C.warm}`, borderRadius: 8, display: "flex", gap: 32, alignItems: "center" }}>
-          <SumCard label="Плановые поступления" value="357 000 ₽" color={C.textLt} />
+          <SumCard label="Плановые поступления" value={ruFmt(rows.filter(r => r.status === "planned").reduce((s, r) => s + r.amount, 0)) + " ₽"} color={C.textLt} />
           <div style={{ width: 1, height: 28, background: C.warm }} />
-          <SumCard label="Подтверждено" value="465 000 ₽" color="#3D6B3D" />
+          <SumCard label="Подтверждено" value={ruFmt(rows.filter(r => r.status === "confirmed").reduce((s, r) => s + r.amount, 0)) + " ₽"} color="#3D6B3D" />
           <div style={{ width: 1, height: 28, background: C.warm }} />
-          <SumCard label="Получено" value="770 000 ₽" color={C.sage} />
+          <SumCard label="Получено" value={ruFmt(rows.filter(r => r.status === "received").reduce((s, r) => s + r.amount, 0)) + " ₽"} color={C.sage} />
           <div style={{ width: 1, height: 28, background: C.warm }} />
-          <SumCard label="Итого" value="1 592 000 ₽" color={C.textDk} bold />
+          <SumCard label="Итого" value={ruFmt(rows.reduce((s, r) => s + r.amount, 0)) + " ₽"} color={C.textDk} bold />
         </div>
       </div>
 

@@ -12,7 +12,12 @@ return new class extends Migration
             $table->id();
             $table->string('name');
             $table->string('inn')->nullable();
-            $table->text('details')->nullable(); // реквизиты
+            $table->string('kpp')->nullable();
+            $table->string('bank_account')->nullable();
+            $table->string('bank_name')->nullable();
+            $table->string('bik')->nullable();
+            $table->enum('type', ['entity', 'individual'])->default('entity');
+            $table->string('contact')->nullable();
             $table->timestamps();
         });
     }

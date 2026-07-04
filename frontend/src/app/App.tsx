@@ -131,6 +131,11 @@ function AppShell() {
               isCashGap={drawerCell?.isCashGap}
               deficitAmount={drawerCell?.deficitAmount}
               paymentAccKey={drawerCell?.accKey ?? "acc1"}
+              cellDate={drawerCell?.cellDate}
+              cellIncome={drawerCell?.cellIncome}
+              cellExpense={drawerCell?.cellExpense}
+              cellBalance={drawerCell?.cellBalance}
+              cellAccountName={drawerCell?.cellAccountName}
               onReschedule={perms.canReschedule
                 ? (from, to, amount, accKey) => rescheduleRef.current?.(from, to, amount, accKey)
                 : undefined}

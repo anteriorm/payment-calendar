@@ -16,7 +16,8 @@ return new class extends Migration
             $table->foreignId('counterparty_id')->constrained()->onDelete('restrict');
             $table->foreignId('item_id')->constrained()->onDelete('restrict');
             $table->string('purpose')->nullable();
-            $table->enum('status', ['planned', 'received', 'canceled'])->default('planned');
+            $table->enum('status', ['planned', 'confirmed', 'received', 'canceled'])->default('planned');
+            $table->foreignId('created_by')->nullable()->constrained('users')->onDelete('set null');
             $table->timestamps();
 
             $table->index('planned_date');

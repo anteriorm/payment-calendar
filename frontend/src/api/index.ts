@@ -24,6 +24,7 @@ export { registriesService as registries } from "./endpoints/registries";
 export { reportsService as reports }       from "./endpoints/reports";
 export { usersService as users }           from "./endpoints/users";
 export { auditService as audit }           from "./endpoints/audit";
+export { importService as importSvc }      from "./endpoints/import";
 
 // Re-export types for convenience
 export type { Account }         from "./mocks/data/accounts";

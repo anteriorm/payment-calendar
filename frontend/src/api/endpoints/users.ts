@@ -16,10 +16,10 @@ import { USE_MOCK } from "../../config";
 let store: User[] = [...mockUsers];
 
 const real = {
-  getAll:  ()                                          => client.get<User[]>("/users").then(r => r.data),
-  create:  (data: Omit<User, "id">)                   => client.post<User>("/users", data).then(r => r.data),
-  update:  (id: number, data: Partial<User>)           => client.put<User>(`/users/${id}`, data).then(r => r.data),
-  delete:  (id: number)                               => client.delete(`/users/${id}`).then(r => r.data),
+  getAll:  ()                                                    => client.get<User[]>("/users").then(r => r.data),
+  create:  (data: Omit<User, "id"> & { password?: string })     => client.post<User>("/users", data).then(r => r.data),
+  update:  (id: number, data: Partial<User> & { password?: string }) => client.put<User>(`/users/${id}`, data).then(r => r.data),
+  delete:  (id: number)                                         => client.delete(`/users/${id}`).then(r => r.data),
 };
 
 const mock = {

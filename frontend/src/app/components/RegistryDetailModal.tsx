@@ -1,15 +1,14 @@
 /**
  * RegistryDetailModal — детальная страница реестра платежей.
- *
- * STUB: данные берутся из api.registries.getOne(id).
- * Бэкенд должен реализовать GET /api/registries/{id}
+ * Данные загружаются из GET /api/registries/{id}
  */
 
 import { useState, useEffect } from "react";
 import { X, Download, CheckCircle, XCircle } from "lucide-react";
 import { C } from "../tokens";
 import { useToast } from "./Toast";
-import { exportCsv } from "../utils";
+import { exportCsv, kopecksToRub } from "../utils";
+import * as api from "../../api";
 
 interface RegistryRow {
   id:           number;
@@ -32,22 +31,7 @@ interface RegistryDetail {
   rows:          RegistryRow[];
 }
 
-// STUB mock data — replace with GET /api/registries/{id}
-const MOCK_DETAIL: RegistryDetail = {
-  id:            1,
-  registry_date: "18.06.2026",
-  status:        "paid",
-  created_by:    "Петров И.А.",
-  approved_by:   "Козлова Е.В.",
-  total_amount:  1240000,
-  rows: [
-    { id: 2845, counterparty: "ООО Поставщик Альфа", article: "Аренда офиса",        amount: 420000, account: "Расчётный №1", date: "25.06.2026", priority: "high",   status: "paid" },
-    { id: 2846, counterparty: "ИП Смирнов А.В.",     article: "Заработная плата",    amount: 560000, account: "Расчётный №1", date: "28.06.2026", priority: "high",   status: "paid" },
-    { id: 2841, counterparty: "АО ТехСервис",        article: "Расходные материалы", amount: 187500, account: "Расчётный №2", date: "24.06.2026", priority: "low",    status: "paid" },
-    { id: 2842, counterparty: "ООО РентаГрупп",      article: "Услуги подрядчиков",  amount: 95000,  account: "Касса",        date: "26.06.2026", priority: "medium", status: "paid" },
-    { id: 2847, counterparty: "ПАО Энергоресурс",    article: "Налоги и сборы",      amount: 260000, account: "Расчётный №2", date: "27.06.2026", priority: "medium", status: "no_funds" },
-  ],
-};
+
 
 const STATUS_BADGE: Record<RegistryDetail["status"], { label: string; bg: string; color: string }> = {
   draft:    { label: "Черновик",  bg: C.ivory,           color: C.textLt  },
@@ -88,11 +72,30 @@ export function RegistryDetailModal({ registryId, onClose }: RegistryDetailModal
 
   useEffect(() => {
     setLoading(true);
-    // STUB: api.registries.getOne(registryId).then(...)
-    setTimeout(() => {
-      setDetail({ ...MOCK_DETAIL, id: registryId });
-      setLoading(false);
-    }, 300);
+    api.registries.getOne(registryId)
+      .then(data => {
+        const mapped: RegistryDetail = {
+          id: data.id,
+          registry_date: data.registry_date,
+          status: data.status === "created" ? "approved" : data.status as any,
+          created_by: data.created_by || "",
+          approved_by: data.approved_by || undefined,
+          total_amount: data.total_amount || 0,
+          rows: (data.payments || []).map((p: any) => ({
+            id: p.id,
+            counterparty: p.counterparty || "",
+            article: p.article || "",
+            amount: kopecksToRub(p.amount || 0),
+            account: p.account || "",
+            date: p.date ? p.date.split("-").reverse().join(".") : "",
+            priority: p.priority || "medium",
+            status: data.status === "paid" ? "paid" : "registry",
+          })),
+        };
+        setDetail(mapped);
+      })
+      .catch(() => showToast("Ошибка загрузки реестра", "error"))
+      .finally(() => setLoading(false));
   }, [registryId]);
 
   const handleExport = () => {

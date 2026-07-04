@@ -13,7 +13,14 @@ return new class extends Migration
     {
         Schema::create('registries', function (Blueprint $table) {
             $table->id();
+            $table->date('registry_date');
+            $table->enum('status', ['created', 'paid', 'canceled'])->default('created');
+            $table->foreignId('created_by')->nullable()->constrained('users')->onDelete('set null');
+            $table->foreignId('approved_by')->nullable()->constrained('users')->onDelete('set null');
             $table->timestamps();
+
+            $table->index('registry_date');
+            $table->index('status');
         });
     }
 

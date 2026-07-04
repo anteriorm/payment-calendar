@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Pencil, Trash2, Plus, X } from "lucide-react";
 import { C } from "../tokens";
 import { useToast } from "./Toast";
-import { required, nonNegative, inn as validateInn, loginFormat, firstError } from "../utils/validation";
+import { required, nonNegative, inn as validateInn, loginFormat } from "../utils/validation";
+import * as api from "../../api";
 
 type TabId = "accounts" | "counterparties" | "articles" | "users";
 
@@ -13,40 +14,12 @@ const TABS: { id: TabId; label: string }[] = [
   { id: "users",          label: "Пользователи"     },
 ];
 
-interface Account { id: number; name: string; currency: string; opening: number; current: number; }
-
-const INITIAL_ACCOUNTS: Account[] = [
-  { id: 1, name: "Расчётный счёт №1", currency: "RUB", opening: 500000, current: 980000 },
-  { id: 2, name: "Расчётный счёт №2", currency: "RUB", opening: 200000, current: 45000  },
-  { id: 3, name: "Касса",             currency: "RUB", opening: 50000,  current: 12500  },
-];
-
-const COUNTERPARTIES = [
-  { id: 1, name: "ООО Поставщик Альфа", inn: "7701234567",   type: "Юр. лицо", contact: "Смирнов А.П."  },
-  { id: 2, name: "ИП Смирнов А.В.",     inn: "772345678901", type: "ИП",        contact: "Смирнов А.В."  },
-  { id: 3, name: "АО ТехСервис",        inn: "7803456789",   type: "Юр. лицо", contact: "Козлова Е.А."  },
-  { id: 4, name: "ООО РентаГрупп",      inn: "7904567890",   type: "Юр. лицо", contact: "Петров И.С."   },
-  { id: 5, name: "ПАО Энергоресурс",    inn: "7705678901",   type: "Юр. лицо", contact: "Васильев К.Д." },
-];
-
-const ARTICLES = [
-  { id: 1, code: "01.01", name: "Аренда офиса",       type: "Расход", group: "Административные"     },
-  { id: 2, code: "01.02", name: "Заработная плата",    type: "Расход", group: "Оплата труда"          },
-  { id: 3, code: "01.03", name: "Расходные материалы", type: "Расход", group: "Административные"     },
-  { id: 4, code: "01.04", name: "Услуги подрядчиков",  type: "Расход", group: "Операционные"         },
-  { id: 5, code: "02.01", name: "Выручка от клиентов", type: "Доход",  group: "Основная деятельность"},
-];
-
-const USERS = [
-  { id: 1, name: "Иванова Мария С.",  login: "m.ivanova",  role: "Инициатор",   status: "active"   },
-  { id: 2, name: "Козлова Елена В.",  login: "e.kozlova",  role: "Согласующий", status: "active"   },
-  { id: 3, name: "Петров Иван А.",    login: "i.petrov",   role: "Казначей",    status: "active"   },
-  { id: 4, name: "Сидоров Андрей К.", login: "a.sidorov",  role: "Наблюдатель", status: "inactive" },
-];
-
-function currencySymbol(c: string): string {
-  return c === "USD" ? "$" : c === "EUR" ? "€" : "₽";
-}
+const TYPE_LABELS: Record<string, string> = { entity: "Юр. лицо", individual: "ИП" };
+const TYPE_VALUES: Record<string, string> = { "Юр. лицо": "entity", "ИП": "individual" };
+const ITEM_LABELS: Record<string, string> = { payment: "Расход", income: "Доход" };
+const ITEM_VALUES: Record<string, string> = { "Расход": "payment", "Доход": "income" };
+const ROLE_LABELS: Record<string, string> = { initiator: "Инициатор", manager: "Согласующий", treasurer: "Казначей", admin: "Администратор" };
+const ROLE_VALUES: Record<string, string> = { "Инициатор": "initiator", "Согласующий": "manager", "Казначей": "treasurer", "Администратор": "admin" };
 
 function ruFmt(n: number): string {
   const s = Math.floor(Math.abs(n)).toString();
@@ -60,39 +33,20 @@ export function References({ canManage = true }: { canManage?: boolean }) {
 
   return (
     <div style={{ padding: 24, fontFamily: "Inter, sans-serif" }}>
-
       <div style={{ marginBottom: 20 }}>
         <h1 style={{ fontSize: 24, fontWeight: 700, color: C.textDk, margin: 0 }}>Справочники</h1>
       </div>
-
-      {/* Tabs */}
       <div style={{ display: "flex", gap: 4, marginBottom: 20 }}>
         {TABS.map(({ id, label }) => {
           const active = tab === id;
           return (
-            <button
-              key={id}
-              onClick={() => setTab(id)}
-              style={{
-                padding: "8px 18px",
-                borderRadius: active ? "6px 6px 0 0" : 6,
-                border: "none",
-                background: active ? C.sage : C.ivory,
-                color: active ? C.surface : C.textLt,
-                fontSize: 13,
-                fontWeight: active ? 600 : 400,
-                cursor: "pointer",
-                fontFamily: "Inter, sans-serif",
-                transition: "background 0.15s, color 0.15s",
-              }}
-            >
+            <button key={id} onClick={() => setTab(id)}
+              style={{ padding: "8px 18px", borderRadius: active ? "6px 6px 0 0" : 6, border: "none", background: active ? C.sage : C.ivory, color: active ? C.surface : C.textLt, fontSize: 13, fontWeight: active ? 600 : 400, cursor: "pointer", fontFamily: "Inter, sans-serif", transition: "background 0.15s, color 0.15s" }}>
               {label}
             </button>
           );
         })}
       </div>
-
-      {/* Content */}
       <div style={{ background: C.surface, border: `1px solid ${C.warm}`, borderRadius: 8, overflow: "hidden", boxShadow: "0 1px 3px rgba(44,44,30,0.08)" }}>
         {tab === "accounts"       && <AccountsTab canManage={canManage} />}
         {tab === "counterparties" && <CounterpartiesTab canManage={canManage} />}
@@ -104,139 +58,265 @@ export function References({ canManage = true }: { canManage?: boolean }) {
 }
 
 /* ── Счета и кассы ─────────────────────────────────── */
-function AccountsTab({ canManage = true }: { canManage?: boolean }) {
+function AccountsTab({ canManage }: { canManage: boolean }) {
   const { showToast } = useToast();
-  const [accounts,   setAccounts]   = useState<Account[]>(INITIAL_ACCOUNTS);
-  const [editTarget, setEditTarget] = useState<Account | null>(null);
-  const [showModal,  setShowModal]  = useState(false);
-  const [delTarget,  setDelTarget]  = useState<Account | null>(null);
+  const [accounts, setAccounts] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [editTarget, setEditTarget] = useState<any | null>(null);
+  const [showModal, setShowModal] = useState(false);
+  const [delTarget, setDelTarget] = useState<any | null>(null);
 
-  const openAdd  = () => { setEditTarget(null); setShowModal(true); };
-  const openEdit = (acc: Account) => { setEditTarget(acc); setShowModal(true); };
-  const openDel  = (acc: Account) => setDelTarget(acc);
+  const load = () => { setLoading(true); api.accounts.getAll().then(setAccounts).catch(() => showToast("Ошибка загрузки счетов", "error")).finally(() => setLoading(false)); };
+  useEffect(() => { load(); }, []);
 
-  const handleSave = (data: { name: string; currency: string; opening: number }) => {
-    if (editTarget) {
-      setAccounts(prev => prev.map(a => a.id === editTarget.id ? { ...a, ...data } : a));
-      showToast("Счёт успешно обновлён", "success");
-    } else {
-      const newAcc: Account = { id: Date.now(), ...data, current: data.opening };
-      setAccounts(prev => [...prev, newAcc]);
-      showToast("Счёт добавлен", "success");
-    }
-    setShowModal(false);
+  const handleSave = async (data: { name: string; currency: string; opening: number }) => {
+    try {
+      if (editTarget) {
+        await api.accounts.update(editTarget.id, { name: data.name, currency: data.currency, opening: data.opening });
+        showToast("Счёт обновлён", "success");
+      } else {
+        await api.accounts.create({ name: data.name, type: "bank", currency: data.currency, opening: data.opening, current: data.opening });
+        showToast("Счёт добавлен", "success");
+      }
+      load(); setShowModal(false);
+    } catch { showToast("Ошибка сохранения", "error"); }
   };
 
-  const handleDelete = () => {
+  const handleDelete = async () => {
     if (!delTarget) return;
-    setAccounts(prev => prev.filter(a => a.id !== delTarget.id));
-    showToast(`Счёт «${delTarget.name}» удалён`, "error");
+    try {
+      await api.accounts.delete(delTarget.id);
+      showToast(`Счёт «${delTarget.name}» удалён`, "error");
+      load();
+    } catch { showToast("Ошибка удаления", "error"); }
     setDelTarget(null);
   };
+
+  if (loading) return <div style={{ padding: 24, color: C.textLt }}>Загрузка...</div>;
 
   return (
     <>
       <TableToolbar>
-        {canManage && (
-          <button
-            onClick={openAdd}
-            style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 16px", borderRadius: 6, background: C.sage, color: C.surface, border: "none", fontSize: 13, fontWeight: 500, cursor: "pointer", fontFamily: "Inter, sans-serif" }}
-          >
-            <Plus size={14} />
-            Добавить счёт
-          </button>
-        )}
+        {canManage && <button onClick={() => { setEditTarget(null); setShowModal(true); }} style={addBtnStyle}><Plus size={14} /> Добавить счёт</button>}
       </TableToolbar>
-
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-        <thead>
-          <tr style={{ background: C.hdr }}>
-            {["Название", "Валюта", "Нач. остаток", "Тек. остаток", "Статус", "Действия"].map(col => (
-              <Th key={col}>{col}</Th>
-            ))}
-          </tr>
-        </thead>
+        <thead><tr style={{ background: C.hdr }}>{["Название", "Валюта", "Нач. остаток", "Тек. остаток", "Статус", "Действия"].map(c => <Th key={c}>{c}</Th>)}</tr></thead>
         <tbody>
           {accounts.map((row, i) => (
             <Tr key={row.id} i={i}>
               <Td bold>{row.name}</Td>
               <Td>{row.currency}</Td>
-              <Td mono>{ruFmt(row.opening)} {currencySymbol(row.currency)}</Td>
-              <Td mono color={row.current < 50000 ? C.danger : C.textDk}>{ruFmt(row.current)} {currencySymbol(row.currency)}</Td>
+              <Td mono>{ruFmt(row.opening)} ₽</Td>
+              <Td mono color={row.current < 0 ? C.danger : C.textDk}>{ruFmt(row.current)} ₽</Td>
               <Td><ActiveBadge /></Td>
-              <Td>
-                {canManage ? (
-                  <div style={{ display: "flex", gap: 6 }}>
-                    <IconBtn title="Редактировать" hoverColor={C.sage} onClick={() => openEdit(row)}>
-                      <Pencil size={14} />
-                    </IconBtn>
-                    <IconBtn title="Удалить" hoverColor={C.danger} onClick={() => openDel(row)}>
-                      <Trash2 size={14} />
-                    </IconBtn>
-                  </div>
-                ) : <span style={{ fontSize: 12, color: "var(--tm-textLt)" }}>—</span>}
-              </Td>
+              <Td>{canManage ? <ActionBtns onEdit={() => { setEditTarget(row); setShowModal(true); }} onDel={() => setDelTarget(row)} /> : <Dash />}</Td>
             </Tr>
           ))}
         </tbody>
       </table>
+      {showModal && <AccountModal initial={editTarget} onSave={handleSave} onClose={() => setShowModal(false)} />}
+      {delTarget && <ConfirmDialog title="Удалить счёт?" message={`Счёт «${delTarget.name}» будет удалён.`} confirmLabel="Удалить" confirmColor={C.danger} onConfirm={handleDelete} onCancel={() => setDelTarget(null)} />}
+    </>
+  );
+}
 
-      {/* Account modal */}
-      {showModal && (
-        <AccountModal
-          initial={editTarget}
-          onSave={handleSave}
-          onClose={() => setShowModal(false)}
-        />
-      )}
+/* ── Контрагенты ───────────────────────────────────── */
+function CounterpartiesTab({ canManage }: { canManage: boolean }) {
+  const { showToast } = useToast();
+  const [rows, setRows] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [editing, setEditing] = useState<any | null>(null);
+  const [showAdd, setShowAdd] = useState(false);
+  const [delTgt, setDelTgt] = useState<any | null>(null);
 
-      {/* Delete confirmation */}
-      {delTarget && (
-        <ConfirmDialog
-          title="Удалить счёт?"
-          message={`Счёт «${delTarget.name}» будет удалён без возможности восстановления.`}
-          confirmLabel="Удалить"
-          confirmColor={C.danger}
-          onConfirm={handleDelete}
-          onCancel={() => setDelTarget(null)}
-        />
-      )}
+  const load = () => { setLoading(true); api.counterparties.getAll().then(setRows).catch(() => showToast("Ошибка загрузки контрагентов", "error")).finally(() => setLoading(false)); };
+  useEffect(() => { load(); }, []);
+
+  const handleSave = async (data: { name: string; inn: string; type: string; contact: string }) => {
+    try {
+      const apiType = TYPE_VALUES[data.type] || "entity";
+      if (editing) {
+        await api.counterparties.update(editing.id, { name: data.name, inn: data.inn, type: apiType as any, contact: data.contact });
+        showToast("Контрагент обновлён", "success");
+      } else {
+        await api.counterparties.create({ name: data.name, inn: data.inn, type: apiType as any, contact: data.contact });
+        showToast("Контрагент добавлен", "success");
+      }
+      load(); setEditing(null); setShowAdd(false);
+    } catch { showToast("Ошибка сохранения", "error"); }
+  };
+
+  const handleDelete = async () => {
+    if (!delTgt) return;
+    try {
+      await api.counterparties.delete(delTgt.id);
+      showToast("Контрагент удалён", "error");
+      load();
+    } catch { showToast("Ошибка удаления", "error"); }
+    setDelTgt(null);
+  };
+
+  if (loading) return <div style={{ padding: 24, color: C.textLt }}>Загрузка...</div>;
+
+  return (
+    <>
+      <TableToolbar>
+        {canManage && <button onClick={() => setShowAdd(true)} style={addBtnStyle}><Plus size={14} /> Добавить контрагента</button>}
+      </TableToolbar>
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+        <thead><tr style={{ background: C.hdr }}>{["Наименование", "ИНН", "Тип", "Контакт", "Действия"].map(c => <Th key={c}>{c}</Th>)}</tr></thead>
+        <tbody>
+          {rows.map((row, i) => (
+            <Tr key={row.id} i={i}>
+              <Td bold>{row.name}</Td><Td mono>{row.inn}</Td><Td>{TYPE_LABELS[row.type] ?? row.type}</Td><Td>{row.contact}</Td>
+              <Td>{canManage ? <ActionBtns onEdit={() => setEditing(row)} onDel={() => setDelTgt(row)} /> : <Dash />}</Td>
+            </Tr>
+          ))}
+        </tbody>
+      </table>
+      {(showAdd || editing) && <CpModal initial={editing} onSave={handleSave} onClose={() => { setEditing(null); setShowAdd(false); }} />}
+      {delTgt && <ConfirmDialog title="Удалить контрагента?" message={`«${delTgt.name}» будет удалён.`} confirmLabel="Удалить" confirmColor={C.danger} onConfirm={handleDelete} onCancel={() => setDelTgt(null)} />}
+    </>
+  );
+}
+
+/* ── Статьи движения ───────────────────────────────── */
+function ArticlesTab({ canManage }: { canManage: boolean }) {
+  const { showToast } = useToast();
+  const [rows, setRows] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [editing, setEditing] = useState<any | null>(null);
+  const [showAdd, setShowAdd] = useState(false);
+  const [delTgt, setDelTgt] = useState<any | null>(null);
+
+  const load = () => { setLoading(true); api.items.getAll().then(setRows).catch(() => showToast("Ошибка загрузки статей", "error")).finally(() => setLoading(false)); };
+  useEffect(() => { load(); }, []);
+
+  const handleSave = async (data: { code: string; name: string; type: string; group: string }) => {
+    try {
+      const apiType = ITEM_VALUES[data.type] || "payment";
+      if (editing) {
+        await api.items.update(editing.id, { code: data.code, name: data.name, type: apiType as any, group: data.group });
+        showToast("Статья обновлена", "success");
+      } else {
+        await api.items.create({ code: data.code, name: data.name, type: apiType as any, group: data.group });
+        showToast("Статья добавлена", "success");
+      }
+      load(); setEditing(null); setShowAdd(false);
+    } catch { showToast("Ошибка сохранения", "error"); }
+  };
+
+  const handleDelete = async () => {
+    if (!delTgt) return;
+    try {
+      await api.items.delete(delTgt.id);
+      showToast("Статья удалена", "error");
+      load();
+    } catch { showToast("Ошибка удаления", "error"); }
+    setDelTgt(null);
+  };
+
+  if (loading) return <div style={{ padding: 24, color: C.textLt }}>Загрузка...</div>;
+
+  return (
+    <>
+      <TableToolbar>
+        {canManage && <button onClick={() => setShowAdd(true)} style={addBtnStyle}><Plus size={14} /> Добавить статью</button>}
+      </TableToolbar>
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+        <thead><tr style={{ background: C.hdr }}>{["Код", "Наименование", "Тип", "Группа", "Действия"].map(c => <Th key={c}>{c}</Th>)}</tr></thead>
+        <tbody>
+          {rows.map((row, i) => (
+            <Tr key={row.id} i={i}>
+              <Td mono>{row.code}</Td><Td bold>{row.name}</Td>
+              <Td><span style={{ display: "inline-flex", padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 500, background: row.type === "income" ? C.sage20 : C.danger15, color: row.type === "income" ? "#3D6B3D" : "#8B2020" }}>{ITEM_LABELS[row.type] ?? row.type}</span></Td>
+              <Td color={C.textLt}>{row.group}</Td>
+              <Td>{canManage ? <ActionBtns onEdit={() => setEditing(row)} onDel={() => setDelTgt(row)} /> : <Dash />}</Td>
+            </Tr>
+          ))}
+        </tbody>
+      </table>
+      {(showAdd || editing) && <ArtModal initial={editing} onSave={handleSave} onClose={() => { setEditing(null); setShowAdd(false); }} />}
+      {delTgt && <ConfirmDialog title="Удалить статью?" message={`«${delTgt.name}» будет удалена.`} confirmLabel="Удалить" confirmColor={C.danger} onConfirm={handleDelete} onCancel={() => setDelTgt(null)} />}
+    </>
+  );
+}
+
+/* ── Пользователи ──────────────────────────────────── */
+function UsersTab({ canManage }: { canManage: boolean }) {
+  const { showToast } = useToast();
+  const [rows, setRows] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [editing, setEditing] = useState<any | null>(null);
+  const [showAdd, setShowAdd] = useState(false);
+  const [delTgt, setDelTgt] = useState<any | null>(null);
+
+  const load = () => { setLoading(true); api.users.getAll().then(setRows).catch(() => showToast("Ошибка загрузки пользователей", "error")).finally(() => setLoading(false)); };
+  useEffect(() => { load(); }, []);
+
+  const handleSave = async (data: { name: string; email: string; role: string; password?: string }) => {
+    try {
+      const apiRole = ROLE_VALUES[data.role] || "initiator";
+      if (editing) {
+        const payload: any = { name: data.name, email: data.email, role: apiRole };
+        if (data.password) payload.password = data.password;
+        await api.users.update(editing.id, payload);
+        showToast("Пользователь обновлён", "success");
+      } else {
+        await api.users.create({ name: data.name, email: data.email, role: apiRole as any, status: "active", password: data.password || "password" });
+        showToast("Пользователь добавлен", "success");
+      }
+      load(); setEditing(null); setShowAdd(false);
+    } catch { showToast("Ошибка сохранения", "error"); }
+  };
+
+  const handleDelete = async () => {
+    if (!delTgt) return;
+    try {
+      await api.users.delete(delTgt.id);
+      showToast("Пользователь удалён", "error");
+      load();
+    } catch { showToast("Ошибка удаления", "error"); }
+    setDelTgt(null);
+  };
+
+  if (loading) return <div style={{ padding: 24, color: C.textLt }}>Загрузка...</div>;
+
+  return (
+    <>
+      <TableToolbar>
+        {canManage && <button onClick={() => setShowAdd(true)} style={addBtnStyle}><Plus size={14} /> Добавить пользователя</button>}
+      </TableToolbar>
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+        <thead><tr style={{ background: C.hdr }}>{["ФИО", "Email", "Роль", "Статус", "Действия"].map(c => <Th key={c}>{c}</Th>)}</tr></thead>
+        <tbody>
+          {rows.map((row, i) => (
+            <Tr key={row.id} i={i}>
+              <Td bold>{row.name}</Td>
+              <Td mono color={C.textLt}>{row.email}</Td>
+              <Td><span style={{ display: "inline-flex", padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 500, background: C.olive20, color: "#555540" }}>{ROLE_LABELS[row.role] ?? row.role}</span></Td>
+              <Td><ActiveBadge /></Td>
+              <Td>{canManage ? <ActionBtns onEdit={() => setEditing(row)} onDel={() => setDelTgt(row)} /> : <Dash />}</Td>
+            </Tr>
+          ))}
+        </tbody>
+      </table>
+      {(showAdd || editing) && <UserModal initial={editing} onSave={handleSave} onClose={() => { setEditing(null); setShowAdd(false); }} />}
+      {delTgt && <ConfirmDialog title="Удалить пользователя?" message={`«${delTgt.name}» будет удалён.`} confirmLabel="Удалить" confirmColor={C.danger} onConfirm={handleDelete} onCancel={() => setDelTgt(null)} />}
     </>
   );
 }
 
 /* ── Account modal ─────────────────────────────────── */
-interface AccountModalProps {
-  initial: Account | null;
-  onSave:  (data: { name: string; currency: string; opening: number }) => void;
-  onClose: () => void;
-}
-
-function AccountModal({ initial, onSave, onClose }: AccountModalProps) {
-  const [name,     setName]     = useState(initial?.name     ?? "");
+function AccountModal({ initial, onSave, onClose }: { initial: any; onSave: (d: any) => void; onClose: () => void }) {
+  const [name, setName] = useState(initial?.name ?? "");
   const [currency, setCurrency] = useState(initial?.currency ?? "RUB");
-  const [opening,  setOpening]  = useState(initial ? String(initial.opening) : "");
-  const [focused,  setFocused]  = useState<string | null>(null);
+  const [opening, setOpening] = useState(initial ? String(initial.opening) : "");
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [focused, setFocused] = useState<string | null>(null);
 
-  const focusStyle = (f: string): React.CSSProperties =>
-    focused === f
-      ? { border: `1.5px solid ${C.sage}`, boxShadow: `0 0 0 3px ${C.sage20}` }
-      : { border: `1px solid ${C.warm}` };
-
-  const base: React.CSSProperties = {
-    width: "100%",
-    padding: "9px 12px",
-    borderRadius: 6,
-    background: C.surface,
-    fontSize: 14,
-    color: C.textDk,
-    outline: "none",
-    fontFamily: "Inter, sans-serif",
-    boxSizing: "border-box",
-    transition: "border 0.15s, box-shadow 0.15s",
-  };
-
-  const [errors, setErrors] = useState<Record<string,string>>({});
+  const focusStyle = (f: string): React.CSSProperties => focused === f ? { border: `1.5px solid ${C.sage}`, boxShadow: `0 0 0 3px ${C.sage20}` } : { border: `1px solid ${C.warm}` };
+  const base: React.CSSProperties = { width: "100%", padding: "9px 12px", borderRadius: 6, background: C.surface, fontSize: 14, color: C.textDk, outline: "none", fontFamily: "Inter, sans-serif", boxSizing: "border-box", transition: "border 0.15s, box-shadow 0.15s" };
 
   const handleSubmit = () => {
     const e: Record<string, string> = {};
@@ -250,86 +330,149 @@ function AccountModal({ initial, onSave, onClose }: AccountModalProps) {
   };
 
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: C.overlay, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, fontFamily: "Inter, sans-serif" }}>
-      <div onClick={e => e.stopPropagation()} style={{ width: 480, background: C.surface, border: `1px solid ${C.warm}`, borderRadius: 12, boxShadow: "0 4px 24px rgba(44,44,30,0.18)", display: "flex", flexDirection: "column" }}>
-
-        {/* Header */}
+    <div onClick={onClose} style={overlayStyle}>
+      <div onClick={e => e.stopPropagation()} style={modalStyle}>
         <div style={{ padding: "20px 24px 16px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <h2 style={{ fontSize: 18, fontWeight: 600, color: C.textDk, margin: 0 }}>
-            {initial ? "Редактировать счёт" : "Добавить счёт"}
-          </h2>
-          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: C.textLt, display: "flex", padding: 4, borderRadius: 4 }}>
-            <X size={18} />
-          </button>
+          <h2 style={{ fontSize: 18, fontWeight: 600, color: C.textDk, margin: 0 }}>{initial ? "Редактировать счёт" : "Добавить счёт"}</h2>
+          <button onClick={onClose} style={closeBtnStyle}><X size={18} /></button>
         </div>
-
         <div style={{ height: 1, background: C.warm }} />
-
-        {/* Form */}
         <div style={{ padding: "20px 24px", display: "flex", flexDirection: "column", gap: 16 }}>
-          {/* Название */}
           <div>
             <FieldLabel>Название</FieldLabel>
-            <input value={name} onChange={e => { setName(e.target.value); setErrors(p => ({...p, name:""})); }}
-              placeholder="Расчётный счёт №1"
-              onFocus={() => setFocused("name")} onBlur={() => setFocused(null)}
-              style={{ ...base, ...focusStyle("name"), ...(errors.name ? {border:`1.5px solid ${C.danger}`} : {}) }} />
+            <input value={name} onChange={e => { setName(e.target.value); setErrors(p => ({ ...p, name: "" })); }} onFocus={() => setFocused("name")} onBlur={() => setFocused(null)} style={{ ...base, ...focusStyle("name"), ...(errors.name ? { border: `1.5px solid ${C.danger }` } : {}) }} />
             {errors.name && <ErrSpan>{errors.name}</ErrSpan>}
           </div>
-
-          {/* Валюта */}
           <div>
             <FieldLabel>Валюта</FieldLabel>
             <div style={{ display: "flex", gap: 8 }}>
               {["RUB", "USD", "EUR"].map(cur => (
-                <button
-                  key={cur}
-                  onClick={() => setCurrency(cur)}
-                  style={{
-                    flex: 1,
-                    padding: "9px 0",
-                    borderRadius: 6,
-                    border: currency === cur ? `2px solid ${C.sage}` : `1px solid ${C.warm}`,
-                    background: currency === cur ? C.sage10 : C.surface,
-                    color: currency === cur ? C.sage : C.textLt,
-                    fontSize: 13,
-                    fontWeight: currency === cur ? 600 : 400,
-                    cursor: "pointer",
-                    fontFamily: "Inter, sans-serif",
-                    transition: "all 0.15s",
-                  }}
-                >
-                  {cur}
-                </button>
+                <button key={cur} onClick={() => setCurrency(cur)} style={{ flex: 1, padding: "9px 0", borderRadius: 6, border: currency === cur ? `2px solid ${C.sage}` : `1px solid ${C.warm}`, background: currency === cur ? C.sage10 : C.surface, color: currency === cur ? C.sage : C.textLt, fontSize: 13, fontWeight: currency === cur ? 600 : 400, cursor: "pointer", fontFamily: "Inter, sans-serif" }}>{cur}</button>
               ))}
             </div>
           </div>
-
-          {/* Начальный остаток */}
           <div>
             <FieldLabel>Начальный остаток</FieldLabel>
-            <div style={{ position: "relative" }}>
-              <input value={opening} onChange={e => setOpening(e.target.value)}
-                placeholder="0"
-                onFocus={() => setFocused("opening")} onBlur={() => setFocused(null)}
-                style={{ ...base, ...focusStyle("opening"), paddingRight: 36, ...(errors.opening ? {border:`1.5px solid ${C.danger}`} : {}) }} />
-              <span style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", fontSize: 14, color: C.textLt, pointerEvents: "none" }}>{currencySymbol(currency)}</span>
-            </div>
+            <input value={opening} onChange={e => setOpening(e.target.value)} onFocus={() => setFocused("opening")} onBlur={() => setFocused(null)} style={{ ...base, ...focusStyle("opening"), ...(errors.opening ? { border: `1.5px solid ${C.danger}` } : {}) }} placeholder="0" />
             {errors.opening && <ErrSpan>{errors.opening}</ErrSpan>}
           </div>
         </div>
-
-        {/* Footer */}
         <div style={{ borderTop: `1px solid ${C.warm}`, padding: "14px 24px", display: "flex", gap: 10 }}>
-          <button
-            onClick={handleSubmit}
-            style={{ padding: "9px 20px", borderRadius: 6, background: C.sage, color: C.surface, border: "none", fontSize: 14, fontWeight: 500, cursor: "pointer", fontFamily: "Inter, sans-serif" }}
-          >
-            Сохранить
-          </button>
-          <button onClick={onClose} style={{ padding: "9px 12px", borderRadius: 6, background: "transparent", color: C.olive, border: "none", fontSize: 14, fontWeight: 500, cursor: "pointer", fontFamily: "Inter, sans-serif", marginLeft: "auto" }}>
-            Отмена
-          </button>
+          <button onClick={handleSubmit} style={saveBtnStyle}>Сохранить</button>
+          <button onClick={onClose} style={cancelBtnStyle}>Отмена</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── Counterparty modal ────────────────────────────── */
+function CpModal({ initial, onSave, onClose }: { initial: any; onSave: (d: any) => void; onClose: () => void }) {
+  const [name, setName] = useState(initial?.name ?? "");
+  const [inn, setInn] = useState(initial?.inn ?? "");
+  const [type, setType] = useState(TYPE_LABELS[initial?.type] ?? "Юр. лицо");
+  const [ctc, setCtc] = useState(initial?.contact ?? "");
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const inp: React.CSSProperties = { width: "100%", padding: "9px 12px", borderRadius: 6, background: C.surface, border: `1px solid ${C.warm}`, fontSize: 14, color: C.textDk, outline: "none", fontFamily: "Inter, sans-serif", boxSizing: "border-box" };
+
+  const handleSave = () => {
+    const e: Record<string, string> = {};
+    const nameErr = required(name, "Наименование обязательно");
+    const innErr = inn.trim() ? validateInn(inn) : null;
+    if (nameErr) e.name = nameErr;
+    if (innErr) e.inn = innErr;
+    if (Object.keys(e).length) { setErrors(e); return; }
+    onSave({ name: name.trim(), inn, type, contact: ctc });
+  };
+
+  return (
+    <div onClick={onClose} style={overlayStyle}>
+      <div onClick={e => e.stopPropagation()} style={modalStyle}>
+        <div style={{ padding: "18px 24px 14px", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: `1px solid ${C.warm}` }}>
+          <span style={{ fontSize: 16, fontWeight: 600, color: C.textDk }}>{initial ? "Редактировать контрагента" : "Добавить контрагента"}</span>
+          <button onClick={onClose} style={closeBtnStyle}><X size={17} /></button>
+        </div>
+        <div style={{ padding: "18px 24px", display: "flex", flexDirection: "column", gap: 14 }}>
+          <div><FieldLabel>Наименование *</FieldLabel><input value={name} onChange={e => { setName(e.target.value); setErrors(p => ({ ...p, name: "" })); }} style={{ ...inp, ...(errors.name ? { border: `1.5px solid ${C.danger}` } : {}) }} />{errors.name && <ErrSpan>{errors.name}</ErrSpan>}</div>
+          <div><FieldLabel>ИНН (10 или 12 цифр)</FieldLabel><input value={inn} onChange={e => { setInn(e.target.value); setErrors(p => ({ ...p, inn: "" })); }} style={{ ...inp, ...(errors.inn ? { border: `1.5px solid ${C.danger}` } : {}) }} placeholder="7701234567" />{errors.inn && <ErrSpan>{errors.inn}</ErrSpan>}</div>
+          <div><FieldLabel>Тип</FieldLabel><div style={{ display: "flex", gap: 8 }}>{["Юр. лицо", "ИП"].map(t => (<button key={t} onClick={() => setType(t)} style={{ flex: 1, padding: "8px 0", borderRadius: 6, border: type === t ? `2px solid ${C.sage}` : `1px solid ${C.warm}`, background: type === t ? C.sage10 : C.surface, color: type === t ? C.sage : C.textLt, fontSize: 12, fontWeight: type === t ? 600 : 400, cursor: "pointer", fontFamily: "Inter, sans-serif" }}>{t}</button>))}</div></div>
+          <div><FieldLabel>Контакт</FieldLabel><input value={ctc} onChange={e => setCtc(e.target.value)} style={inp} /></div>
+        </div>
+        <div style={{ borderTop: `1px solid ${C.warm}`, padding: "14px 24px", display: "flex", gap: 10 }}>
+          <button onClick={handleSave} style={saveBtnStyle}>Сохранить</button>
+          <button onClick={onClose} style={cancelBtnStyle}>Отмена</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── Article modal ─────────────────────────────────── */
+function ArtModal({ initial, onSave, onClose }: { initial: any; onSave: (d: any) => void; onClose: () => void }) {
+  const [code, setCode] = useState(initial?.code ?? "");
+  const [name, setName] = useState(initial?.name ?? "");
+  const [type, setType] = useState(ITEM_LABELS[initial?.type] ?? "Расход");
+  const [group, setGroup] = useState(initial?.group ?? "");
+  const inp: React.CSSProperties = { width: "100%", padding: "9px 12px", borderRadius: 6, background: C.surface, border: `1px solid ${C.warm}`, fontSize: 14, color: C.textDk, outline: "none", fontFamily: "Inter, sans-serif", boxSizing: "border-box" };
+
+  return (
+    <div onClick={onClose} style={overlayStyle}>
+      <div onClick={e => e.stopPropagation()} style={modalStyle}>
+        <div style={{ padding: "18px 24px 14px", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: `1px solid ${C.warm}` }}>
+          <span style={{ fontSize: 16, fontWeight: 600, color: C.textDk }}>{initial ? "Редактировать статью" : "Добавить статью"}</span>
+          <button onClick={onClose} style={closeBtnStyle}><X size={17} /></button>
+        </div>
+        <div style={{ padding: "18px 24px", display: "flex", flexDirection: "column", gap: 14 }}>
+          <div style={{ display: "flex", gap: 12 }}>
+            <div style={{ flex: "0 0 90px" }}><FieldLabel>Код</FieldLabel><input value={code} onChange={e => setCode(e.target.value)} style={inp} placeholder="01.01" /></div>
+            <div style={{ flex: 1 }}><FieldLabel>Наименование</FieldLabel><input value={name} onChange={e => setName(e.target.value)} style={inp} /></div>
+          </div>
+          <div><FieldLabel>Тип</FieldLabel><div style={{ display: "flex", gap: 8 }}>{["Расход", "Доход"].map(t => (<button key={t} onClick={() => setType(t)} style={{ flex: 1, padding: "8px 0", borderRadius: 6, border: type === t ? `2px solid ${t === "Доход" ? C.sage : C.danger}` : `1px solid ${C.warm}`, background: type === t ? (t === "Доход" ? C.sage10 : C.danger15) : C.surface, color: type === t ? (t === "Доход" ? C.sage : C.danger) : C.textLt, fontSize: 13, fontWeight: type === t ? 600 : 400, cursor: "pointer", fontFamily: "Inter, sans-serif" }}>{t}</button>))}</div></div>
+          <div><FieldLabel>Группа</FieldLabel><input value={group} onChange={e => setGroup(e.target.value)} style={inp} placeholder="Административные" /></div>
+        </div>
+        <div style={{ borderTop: `1px solid ${C.warm}`, padding: "14px 24px", display: "flex", gap: 10 }}>
+          <button onClick={() => {
+            if (!code.trim() || !name.trim()) { alert("Код и наименование обязательны"); return; }
+            onSave({ code: code.trim(), name: name.trim(), type, group: group.trim() });
+          }} style={saveBtnStyle}>Сохранить</button>
+          <button onClick={onClose} style={cancelBtnStyle}>Отмена</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── User modal ────────────────────────────────────── */
+function UserModal({ initial, onSave, onClose }: { initial: any; onSave: (d: any) => void; onClose: () => void }) {
+  const [name, setName] = useState(initial?.name ?? "");
+  const [email, setEmail] = useState(initial?.email ?? "");
+  const [role, setRole] = useState(ROLE_LABELS[initial?.role] ?? "Инициатор");
+  const [password, setPassword] = useState("");
+  const inp: React.CSSProperties = { width: "100%", padding: "9px 12px", borderRadius: 6, background: C.surface, border: `1px solid ${C.warm}`, fontSize: 14, color: C.textDk, outline: "none", fontFamily: "Inter, sans-serif", boxSizing: "border-box" };
+
+  return (
+    <div onClick={onClose} style={overlayStyle}>
+      <div onClick={e => e.stopPropagation()} style={modalStyle}>
+        <div style={{ padding: "18px 24px 14px", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: `1px solid ${C.warm}` }}>
+          <span style={{ fontSize: 16, fontWeight: 600, color: C.textDk }}>{initial ? "Редактировать пользователя" : "Добавить пользователя"}</span>
+          <button onClick={onClose} style={closeBtnStyle}><X size={17} /></button>
+        </div>
+        <div style={{ padding: "18px 24px", display: "flex", flexDirection: "column", gap: 14 }}>
+          <div><FieldLabel>ФИО</FieldLabel><input value={name} onChange={e => setName(e.target.value)} style={inp} placeholder="Иванова Мария С." /></div>
+          <div><FieldLabel>Email</FieldLabel><input value={email} onChange={e => setEmail(e.target.value)} style={inp} placeholder="m.ivanova@truemachine.ru" /></div>
+          {!initial && <div><FieldLabel>Пароль</FieldLabel><input type="password" value={password} onChange={e => setPassword(e.target.value)} style={inp} placeholder="минимум 6 символов" /></div>}
+          <div><FieldLabel>Роль</FieldLabel><div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>{["Инициатор", "Согласующий", "Казначей", "Администратор"].map(r => (<button key={r} onClick={() => setRole(r)} style={{ padding: "7px 12px", borderRadius: 6, border: role === r ? `2px solid ${C.sage}` : `1px solid ${C.warm}`, background: role === r ? C.sage10 : C.surface, color: role === r ? C.sage : C.textLt, fontSize: 12, fontWeight: role === r ? 600 : 400, cursor: "pointer", fontFamily: "Inter, sans-serif" }}>{r}</button>))}</div></div>
+        </div>
+        <div style={{ borderTop: `1px solid ${C.warm}`, padding: "14px 24px", display: "flex", gap: 10 }}>
+          <button onClick={() => {
+            const errs: string[] = [];
+            if (!name.trim()) errs.push("ФИО обязательно");
+            if (!email.trim()) errs.push("Email обязателен");
+            if (!initial && !password.trim()) errs.push("Пароль обязателен");
+            if (errs.length) { alert(errs.join("\n")); return; }
+            onSave({ name: name.trim(), email: email.trim(), role, password: password || undefined });
+          }} style={saveBtnStyle}>Сохранить</button>
+          <button onClick={onClose} style={cancelBtnStyle}>Отмена</button>
         </div>
       </div>
     </div>
@@ -337,302 +480,15 @@ function AccountModal({ initial, onSave, onClose }: AccountModalProps) {
 }
 
 /* ── Confirmation dialog ────────────────────────────── */
-function ConfirmDialog({
-  title, message, confirmLabel, confirmColor, onConfirm, onCancel,
-}: {
-  title: string; message: string; confirmLabel: string; confirmColor: string;
-  onConfirm: () => void; onCancel: () => void;
-}) {
+function ConfirmDialog({ title, message, confirmLabel, confirmColor, onConfirm, onCancel }: { title: string; message: string; confirmLabel: string; confirmColor: string; onConfirm: () => void; onCancel: () => void }) {
   return (
-    <div onClick={onCancel} style={{ position: "fixed", inset: 0, background: C.overlay, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, fontFamily: "Inter, sans-serif" }}>
+    <div onClick={onCancel} style={overlayStyle}>
       <div onClick={e => e.stopPropagation()} style={{ width: 400, background: C.surface, border: `1px solid ${C.warm}`, borderRadius: 12, boxShadow: "0 4px 24px rgba(44,44,30,0.18)", padding: "28px 28px 20px" }}>
         <h3 style={{ fontSize: 16, fontWeight: 700, color: C.textDk, margin: "0 0 10px" }}>{title}</h3>
         <p style={{ fontSize: 14, color: C.textLt, margin: "0 0 24px", lineHeight: 1.5 }}>{message}</p>
         <div style={{ display: "flex", gap: 10 }}>
-          <button
-            onClick={onConfirm}
-            style={{ padding: "9px 20px", borderRadius: 6, background: confirmColor, color: C.surface, border: "none", fontSize: 14, fontWeight: 500, cursor: "pointer", fontFamily: "Inter, sans-serif" }}
-          >
-            {confirmLabel}
-          </button>
-          <button onClick={onCancel} style={{ padding: "9px 12px", borderRadius: 6, background: "transparent", color: C.olive, border: "none", fontSize: 14, fontWeight: 500, cursor: "pointer", fontFamily: "Inter, sans-serif" }}>
-            Отмена
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ── Other tabs (read-only) ────────────────────────── */
-/* ── Контрагенты (full CRUD) ─────────────────────────── */
-interface Counterparty { id: number; name: string; inn: string; type: string; contact: string; }
-
-function CounterpartiesTab({ canManage = true }: { canManage?: boolean }) {
-  const { showToast } = useToast();
-  const [rows,    setRows]    = useState<Counterparty[]>(COUNTERPARTIES.map(r => ({ ...r })));
-  const [editing, setEditing] = useState<Counterparty | null>(null);
-  const [showAdd, setShowAdd] = useState(false);
-  const [delTgt,  setDelTgt]  = useState<Counterparty | null>(null);
-  const save = (r: Counterparty) => {
-    if (r.id < 0) { setRows(p => [...p, { ...r, id: Date.now() }]); showToast("Контрагент добавлен", "success"); }
-    else          { setRows(p => p.map(x => x.id === r.id ? r : x)); showToast("Контрагент обновлён", "success"); }
-    setEditing(null); setShowAdd(false);
-  };
-  return (
-    <>
-      <TableToolbar>
-        {canManage && (
-        <button onClick={() => setShowAdd(true)} style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 16px", borderRadius: 6, background: C.sage, color: C.surface, border: "none", fontSize: 13, fontWeight: 500, cursor: "pointer", fontFamily: "Inter, sans-serif" }}>
-          <Plus size={14} />Добавить контрагента
-        </button>
-        )}
-      </TableToolbar>
-      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-        <thead><tr style={{ background: C.hdr }}>{["Наименование","ИНН","Тип","Контакт","Действия"].map(c => <Th key={c}>{c}</Th>)}</tr></thead>
-        <tbody>
-          {rows.map((row, i) => (
-            <Tr key={row.id} i={i}>
-              <Td bold>{row.name}</Td><Td mono>{row.inn}</Td><Td>{row.type}</Td><Td>{row.contact}</Td>
-              <Td><div style={{ display: "flex", gap: 6 }}>
-                {canManage ? <>
-                  <IconBtn title="Редактировать" hoverColor={C.sage} onClick={() => setEditing(row)}><Pencil size={14} /></IconBtn>
-                  <IconBtn title="Удалить" hoverColor={C.danger} onClick={() => setDelTgt(row)}><Trash2 size={14} /></IconBtn>
-                </> : <span style={{ fontSize: 12, color: "var(--tm-textLt)" }}>—</span>}
-              </div></Td>
-            </Tr>
-          ))}
-        </tbody>
-      </table>
-      {(showAdd || editing) && <CpModal initial={editing} onSave={save} onClose={() => { setEditing(null); setShowAdd(false); }} />}
-      {delTgt && <ConfirmDialog title="Удалить контрагента?" message={`«${delTgt.name}» будет удалён.`} confirmLabel="Удалить" confirmColor={C.danger}
-        onConfirm={() => { setRows(p => p.filter(x => x.id !== delTgt!.id)); showToast("Контрагент удалён", "error"); setDelTgt(null); }} onCancel={() => setDelTgt(null)} />}
-    </>
-  );
-}
-function CpModal({ initial, onSave, onClose }: { initial: Counterparty | null; onSave: (r: Counterparty) => void; onClose: () => void }) {
-  const [name, setName] = useState(initial?.name ?? "");
-  const [inn,  setInn]  = useState(initial?.inn  ?? "");
-  const [type, setType] = useState(initial?.type ?? "Юр. лицо");
-  const [ctc,  setCtc]  = useState(initial?.contact ?? "");
-  const [errors, setErrors] = useState<Record<string,string>>({});
-
-  const inp: React.CSSProperties = { width: "100%", padding: "9px 12px", borderRadius: 6, background: C.surface, border: `1px solid ${C.warm}`, fontSize: 14, color: C.textDk, outline: "none", fontFamily: "Inter, sans-serif", boxSizing: "border-box" };
-  const errBorder = { border: `1.5px solid ${C.danger}` };
-
-  const handleSave = () => {
-    const e: Record<string,string> = {};
-    const nameErr = required(name, "Наименование обязательно");
-    const innErr  = inn.trim() ? validateInn(inn) : null;  // ИНН опционален для Физ. лица
-    if (nameErr) e.name = nameErr;
-    if (innErr)  e.inn  = innErr;
-    if (Object.keys(e).length) { setErrors(e); return; }
-    onSave({ id: initial?.id ?? -1, name: name.trim(), inn, type, contact: ctc });
-  };
-
-  return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: C.overlay, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, fontFamily: "Inter, sans-serif" }}>
-      <div onClick={e => e.stopPropagation()} style={{ width: 480, background: C.surface, border: `1px solid ${C.warm}`, borderRadius: 12, boxShadow: "0 4px 24px rgba(44,44,30,0.18)" }}>
-        <div style={{ padding: "18px 24px 14px", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: `1px solid ${C.warm}` }}>
-          <span style={{ fontSize: 16, fontWeight: 600, color: C.textDk }}>{initial ? "Редактировать контрагента" : "Добавить контрагента"}</span>
-          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: C.textLt, display: "flex" }}><X size={17} /></button>
-        </div>
-        <div style={{ padding: "18px 24px", display: "flex", flexDirection: "column", gap: 14 }}>
-          <div>
-            <FieldLabel>Наименование <Req /></FieldLabel>
-            <input value={name} onChange={e => { setName(e.target.value); setErrors(p => ({...p, name:""})); }} style={{ ...inp, ...(errors.name ? errBorder : {}) }} />
-            {errors.name && <ErrSpan>{errors.name}</ErrSpan>}
-          </div>
-          <div>
-            <FieldLabel>ИНН (10 или 12 цифр)</FieldLabel>
-            <input value={inn} onChange={e => { setInn(e.target.value); setErrors(p => ({...p, inn:""})); }} style={{ ...inp, ...(errors.inn ? errBorder : {}) }} placeholder="7701234567" />
-            {errors.inn && <ErrSpan>{errors.inn}</ErrSpan>}
-          </div>
-          <div><FieldLabel>Тип</FieldLabel>
-            <div style={{ display: "flex", gap: 8 }}>{["Юр. лицо","ИП","Физ. лицо"].map(t => (
-              <button key={t} onClick={() => setType(t)} style={{ flex: 1, padding: "8px 0", borderRadius: 6, border: type === t ? `2px solid ${C.sage}` : `1px solid ${C.warm}`, background: type === t ? C.sage10 : C.surface, color: type === t ? C.sage : C.textLt, fontSize: 12, fontWeight: type === t ? 600 : 400, cursor: "pointer", fontFamily: "Inter, sans-serif" }}>{t}</button>
-            ))}</div>
-          </div>
-          <div><FieldLabel>Контакт</FieldLabel><input value={ctc} onChange={e => setCtc(e.target.value)} style={inp} /></div>
-        </div>
-        <div style={{ borderTop: `1px solid ${C.warm}`, padding: "14px 24px", display: "flex", gap: 10 }}>
-          <button onClick={handleSave} style={{ padding: "9px 20px", borderRadius: 6, background: C.sage, color: C.surface, border: "none", fontSize: 14, fontWeight: 500, cursor: "pointer", fontFamily: "Inter, sans-serif" }}>Сохранить</button>
-          <button onClick={onClose} style={{ padding: "9px 12px", borderRadius: 6, background: "transparent", color: C.olive, border: "none", fontSize: 14, cursor: "pointer", fontFamily: "Inter, sans-serif", marginLeft: "auto" }}>Отмена</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ── Статьи движения (full CRUD) ─────────────────────── */
-interface Article { id: number; code: string; name: string; type: string; group: string; }
-
-function ArticlesTab({ canManage = true }: { canManage?: boolean }) {
-  const { showToast } = useToast();
-  const [rows,    setRows]    = useState<Article[]>(ARTICLES.map(r => ({ ...r })));
-  const [editing, setEditing] = useState<Article | null>(null);
-  const [showAdd, setShowAdd] = useState(false);
-  const [delTgt,  setDelTgt]  = useState<Article | null>(null);
-  const save = (r: Article) => {
-    if (r.id < 0) { setRows(p => [...p, { ...r, id: Date.now() }]); showToast("Статья добавлена", "success"); }
-    else          { setRows(p => p.map(x => x.id === r.id ? r : x)); showToast("Статья обновлена", "success"); }
-    setEditing(null); setShowAdd(false);
-  };
-  return (
-    <>
-      <TableToolbar>
-        {canManage && <button onClick={() => setShowAdd(true)} style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 16px", borderRadius: 6, background: C.sage, color: C.surface, border: "none", fontSize: 13, fontWeight: 500, cursor: "pointer", fontFamily: "Inter, sans-serif" }}>
-          <Plus size={14} />Добавить статью
-        </button>}
-      </TableToolbar>
-      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-        <thead><tr style={{ background: C.hdr }}>{["Код","Наименование","Тип","Группа","Действия"].map(c => <Th key={c}>{c}</Th>)}</tr></thead>
-        <tbody>
-          {rows.map((row, i) => (
-            <Tr key={row.id} i={i}>
-              <Td mono>{row.code}</Td><Td bold>{row.name}</Td>
-              <Td><span style={{ display: "inline-flex", padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 500, background: row.type === "Доход" ? C.sage20 : C.danger15, color: row.type === "Доход" ? "#3D6B3D" : "#8B2020" }}>{row.type}</span></Td>
-              <Td color={C.textLt}>{row.group}</Td>
-              <Td><div style={{ display: "flex", gap: 6 }}>
-                {canManage ? <>
-                  <IconBtn title="Редактировать" hoverColor={C.sage} onClick={() => setEditing(row)}><Pencil size={14} /></IconBtn>
-                  <IconBtn title="Удалить" hoverColor={C.danger} onClick={() => setDelTgt(row)}><Trash2 size={14} /></IconBtn>
-                </> : <span style={{ fontSize: 12, color: "var(--tm-textLt)" }}>—</span>}
-              </div></Td>
-            </Tr>
-          ))}
-        </tbody>
-      </table>
-      {(showAdd || editing) && <ArtModal initial={editing} onSave={save} onClose={() => { setEditing(null); setShowAdd(false); }} />}
-      {delTgt && <ConfirmDialog title="Удалить статью?" message={`«${delTgt.name}» будет удалена.`} confirmLabel="Удалить" confirmColor={C.danger}
-        onConfirm={() => { setRows(p => p.filter(x => x.id !== delTgt!.id)); showToast("Статья удалена", "error"); setDelTgt(null); }} onCancel={() => setDelTgt(null)} />}
-    </>
-  );
-}
-function ArtModal({ initial, onSave, onClose }: { initial: Article | null; onSave: (r: Article) => void; onClose: () => void }) {
-  const [code, setCode] = useState(initial?.code ?? ""); const [name, setName] = useState(initial?.name ?? "");
-  const [type, setType] = useState(initial?.type ?? "Расход"); const [group, setGroup] = useState(initial?.group ?? "");
-  const inp: React.CSSProperties = { width: "100%", padding: "9px 12px", borderRadius: 6, background: C.surface, border: `1px solid ${C.warm}`, fontSize: 14, color: C.textDk, outline: "none", fontFamily: "Inter, sans-serif", boxSizing: "border-box" };
-  return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: C.overlay, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, fontFamily: "Inter, sans-serif" }}>
-      <div onClick={e => e.stopPropagation()} style={{ width: 480, background: C.surface, border: `1px solid ${C.warm}`, borderRadius: 12, boxShadow: "0 4px 24px rgba(44,44,30,0.18)" }}>
-        <div style={{ padding: "18px 24px 14px", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: `1px solid ${C.warm}` }}>
-          <span style={{ fontSize: 16, fontWeight: 600, color: C.textDk }}>{initial ? "Редактировать статью" : "Добавить статью"}</span>
-          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: C.textLt, display: "flex" }}><X size={17} /></button>
-        </div>
-        <div style={{ padding: "18px 24px", display: "flex", flexDirection: "column", gap: 14 }}>
-          <div style={{ display: "flex", gap: 12 }}>
-            <div style={{ flex: "0 0 90px" }}><FieldLabel>Код</FieldLabel><input value={code} onChange={e => setCode(e.target.value)} style={inp} placeholder="01.01" /></div>
-            <div style={{ flex: 1 }}><FieldLabel>Наименование</FieldLabel><input value={name} onChange={e => setName(e.target.value)} style={inp} /></div>
-          </div>
-          <div><FieldLabel>Тип</FieldLabel>
-            <div style={{ display: "flex", gap: 8 }}>{["Расход","Доход"].map(t => (
-              <button key={t} onClick={() => setType(t)} style={{ flex: 1, padding: "8px 0", borderRadius: 6, border: type === t ? `2px solid ${t === "Доход" ? C.sage : C.danger}` : `1px solid ${C.warm}`, background: type === t ? (t === "Доход" ? C.sage10 : C.danger15) : C.surface, color: type === t ? (t === "Доход" ? C.sage : C.danger) : C.textLt, fontSize: 13, fontWeight: type === t ? 600 : 400, cursor: "pointer", fontFamily: "Inter, sans-serif" }}>{t}</button>
-            ))}</div>
-          </div>
-          <div><FieldLabel>Группа</FieldLabel><input value={group} onChange={e => setGroup(e.target.value)} style={inp} placeholder="Административные" /></div>
-        </div>
-        <div style={{ borderTop: `1px solid ${C.warm}`, padding: "14px 24px", display: "flex", gap: 10 }}>
-          <button onClick={() => {
-            const e: Record<string,string> = {};
-            if (!code.trim()) e.code = "Код обязателен";
-            if (!name.trim()) e.name = "Наименование обязательно";
-            if (Object.keys(e).length) { alert(Object.values(e).join("\n")); return; }
-            onSave({ id: initial?.id ?? -1, code: code.trim(), name: name.trim(), type, group: group.trim() });
-          }} style={{ padding: "9px 20px", borderRadius: 6, background: C.sage, color: C.surface, border: "none", fontSize: 14, fontWeight: 500, cursor: "pointer", fontFamily: "Inter, sans-serif" }}>Сохранить</button>
-          <button onClick={onClose} style={{ padding: "9px 12px", borderRadius: 6, background: "transparent", color: C.olive, border: "none", fontSize: 14, cursor: "pointer", fontFamily: "Inter, sans-serif", marginLeft: "auto" }}>Отмена</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ── Пользователи (full CRUD) ────────────────────────── */
-interface AppUser { id: number; name: string; login: string; role: string; status: string; }
-
-function UsersTab({ canManage = true }: { canManage?: boolean }) {
-  const { showToast } = useToast();
-  const [rows,    setRows]    = useState<AppUser[]>(USERS.map(r => ({ ...r })));
-  const [editing, setEditing] = useState<AppUser | null>(null);
-  const [showAdd, setShowAdd] = useState(false);
-  const [delTgt,  setDelTgt]  = useState<AppUser | null>(null);
-  const save = (r: AppUser) => {
-    if (r.id < 0) { setRows(p => [...p, { ...r, id: Date.now() }]); showToast("Пользователь добавлен", "success"); }
-    else          { setRows(p => p.map(x => x.id === r.id ? r : x)); showToast("Пользователь обновлён", "success"); }
-    setEditing(null); setShowAdd(false);
-  };
-  const toggleStatus = (id: number) => setRows(p => p.map(x => x.id === id ? { ...x, status: x.status === "active" ? "inactive" : "active" } : x));
-  return (
-    <>
-      <TableToolbar>
-        {canManage && <button onClick={() => setShowAdd(true)} style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 16px", borderRadius: 6, background: C.sage, color: C.surface, border: "none", fontSize: 13, fontWeight: 500, cursor: "pointer", fontFamily: "Inter, sans-serif" }}>
-          <Plus size={14} />Добавить пользователя
-        </button>}
-      </TableToolbar>
-      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-        <thead><tr style={{ background: C.hdr }}>{["ФИО","Логин","Роль","Статус","Действия"].map(c => <Th key={c}>{c}</Th>)}</tr></thead>
-        <tbody>
-          {rows.map((row, i) => (
-            <Tr key={row.id} i={i}>
-              <Td bold>{row.name}</Td>
-              <Td mono color={C.textLt}>{row.login}</Td>
-              <Td><span style={{ display: "inline-flex", padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 500, background: C.olive20, color: "#555540" }}>{row.role}</span></Td>
-              <Td><button onClick={() => toggleStatus(row.id)} title="Переключить статус" style={{ background: "none", border: "none", cursor: "pointer", padding: 0 }}>
-                {row.status === "active" ? <ActiveBadge /> : <InactiveBadge />}
-              </button></Td>
-              <Td><div style={{ display: "flex", gap: 6 }}>
-                {canManage ? <>
-                  <IconBtn title="Редактировать" hoverColor={C.sage} onClick={() => setEditing(row)}><Pencil size={14} /></IconBtn>
-                  <IconBtn title="Удалить" hoverColor={C.danger} onClick={() => setDelTgt(row)}><Trash2 size={14} /></IconBtn>
-                </> : <span style={{ fontSize: 12, color: "var(--tm-textLt)" }}>—</span>}
-              </div></Td>
-            </Tr>
-          ))}
-        </tbody>
-      </table>
-      {(showAdd || editing) && <UserModal initial={editing} onSave={save} onClose={() => { setEditing(null); setShowAdd(false); }} />}
-      {delTgt && <ConfirmDialog title="Удалить пользователя?" message={`«${delTgt.name}» будет удалён.`} confirmLabel="Удалить" confirmColor={C.danger}
-        onConfirm={() => { setRows(p => p.filter(x => x.id !== delTgt!.id)); showToast("Пользователь удалён", "error"); setDelTgt(null); }} onCancel={() => setDelTgt(null)} />}
-    </>
-  );
-}
-function UserModal({ initial, onSave, onClose }: { initial: AppUser | null; onSave: (r: AppUser) => void; onClose: () => void }) {
-  const [name,   setName]   = useState(initial?.name   ?? "");
-  const [login,  setLogin]  = useState(initial?.login  ?? "");
-  const [role,   setRole]   = useState(initial?.role   ?? "Инициатор");
-  const [status, setStatus] = useState(initial?.status ?? "active");
-  const inp: React.CSSProperties = { width: "100%", padding: "9px 12px", borderRadius: 6, background: C.surface, border: `1px solid ${C.warm}`, fontSize: 14, color: C.textDk, outline: "none", fontFamily: "Inter, sans-serif", boxSizing: "border-box" };
-  return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: C.overlay, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, fontFamily: "Inter, sans-serif" }}>
-      <div onClick={e => e.stopPropagation()} style={{ width: 480, background: C.surface, border: `1px solid ${C.warm}`, borderRadius: 12, boxShadow: "0 4px 24px rgba(44,44,30,0.18)" }}>
-        <div style={{ padding: "18px 24px 14px", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: `1px solid ${C.warm}` }}>
-          <span style={{ fontSize: 16, fontWeight: 600, color: C.textDk }}>{initial ? "Редактировать пользователя" : "Добавить пользователя"}</span>
-          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: C.textLt, display: "flex" }}><X size={17} /></button>
-        </div>
-        <div style={{ padding: "18px 24px", display: "flex", flexDirection: "column", gap: 14 }}>
-          <div><FieldLabel>ФИО</FieldLabel><input value={name} onChange={e => setName(e.target.value)} style={inp} placeholder="Иванова Мария С." /></div>
-          <div><FieldLabel>Логин</FieldLabel><input value={login} onChange={e => setLogin(e.target.value)} style={inp} placeholder="m.ivanova" /></div>
-          <div><FieldLabel>Роль</FieldLabel>
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>{["Инициатор","Согласующий","Казначей","Наблюдатель"].map(r => (
-              <button key={r} onClick={() => setRole(r)} style={{ padding: "7px 12px", borderRadius: 6, border: role === r ? `2px solid ${C.sage}` : `1px solid ${C.warm}`, background: role === r ? C.sage10 : C.surface, color: role === r ? C.sage : C.textLt, fontSize: 12, fontWeight: role === r ? 600 : 400, cursor: "pointer", fontFamily: "Inter, sans-serif" }}>{r}</button>
-            ))}</div>
-          </div>
-          <div><FieldLabel>Статус</FieldLabel>
-            <div style={{ display: "flex", gap: 8 }}>{[["active","Активен"],["inactive","Неактивен"]].map(([v,l]) => (
-              <button key={v} onClick={() => setStatus(v)} style={{ flex: 1, padding: "8px 0", borderRadius: 6, border: status === v ? `2px solid ${v === "active" ? C.sage : C.warm}` : `1px solid ${C.warm}`, background: status === v ? (v === "active" ? C.sage10 : C.ivory) : C.surface, color: status === v ? (v === "active" ? C.sage : C.textLt) : C.textLt, fontSize: 13, fontWeight: status === v ? 600 : 400, cursor: "pointer", fontFamily: "Inter, sans-serif" }}>{l}</button>
-            ))}</div>
-          </div>
-        </div>
-        <div style={{ borderTop: `1px solid ${C.warm}`, padding: "14px 24px", display: "flex", gap: 10 }}>
-          <button onClick={() => {
-            const errs: string[] = [];
-            if (!name.trim())  errs.push("ФИО обязательно");
-            if (!login.trim()) errs.push("Логин обязателен");
-            else if (loginFormat(login)) errs.push(loginFormat(login)!);
-            if (errs.length) { alert(errs.join("\n")); return; }
-            onSave({ id: initial?.id ?? -1, name: name.trim(), login: login.trim(), role, status });
-          }} style={{ padding: "9px 20px", borderRadius: 6, background: C.sage, color: C.surface, border: "none", fontSize: 14, fontWeight: 500, cursor: "pointer", fontFamily: "Inter, sans-serif" }}>Сохранить</button>
-          <button onClick={onClose} style={{ padding: "9px 12px", borderRadius: 6, background: "transparent", color: C.olive, border: "none", fontSize: 14, cursor: "pointer", fontFamily: "Inter, sans-serif", marginLeft: "auto" }}>Отмена</button>
+          <button onClick={onConfirm} style={{ ...saveBtnStyle, background: confirmColor }}>Удалить</button>
+          <button onClick={onCancel} style={cancelBtnStyle}>Отмена</button>
         </div>
       </div>
     </div>
@@ -641,78 +497,46 @@ function UserModal({ initial, onSave, onClose }: { initial: AppUser | null; onSa
 
 /* ── Shared primitives ─────────────────────────────── */
 function TableToolbar({ children }: { children: React.ReactNode }) {
-  return (
-    <div style={{ padding: "12px 16px", borderBottom: `1px solid ${C.warm}`, display: "flex", justifyContent: "flex-end" }}>
-      {children}
-    </div>
-  );
+  return <div style={{ padding: "12px 16px", borderBottom: `1px solid ${C.warm}`, display: "flex", justifyContent: "flex-end" }}>{children}</div>;
 }
-
-function AddBtn({ label }: { label: string }) {
-  return (
-    <button style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 16px", borderRadius: 6, background: C.sage, color: C.surface, border: "none", fontSize: 13, fontWeight: 500, cursor: "pointer", fontFamily: "Inter, sans-serif" }}>
-      <Plus size={14} />
-      {label}
-    </button>
-  );
-}
-
 function Th({ children }: { children: React.ReactNode }) {
   return <th style={{ padding: "10px 14px", textAlign: "left", fontWeight: 600, color: C.textDk, fontSize: 12, whiteSpace: "nowrap" }}>{children}</th>;
 }
-
 function Tr({ children, i }: { children: React.ReactNode; i: number }) {
   const [hov, setHov] = useState(false);
-  return (
-    <tr onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}
-      style={{ background: hov ? C.beige30 : i % 2 === 0 ? C.surface : C.ivory50, transition: "background 0.1s", borderBottom: `1px solid ${C.ivory}` }}>
-      {children}
-    </tr>
-  );
+  return <tr onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)} style={{ background: hov ? C.beige30 : i % 2 === 0 ? C.surface : C.ivory50, transition: "background 0.1s", borderBottom: `1px solid ${C.ivory}` }}>{children}</tr>;
 }
-
 function Td({ children, bold, mono, color }: { children?: React.ReactNode; bold?: boolean; mono?: boolean; color?: string }) {
   return <td style={{ padding: "11px 14px", color: color ?? C.textDk, fontWeight: bold ? 600 : 400, fontVariantNumeric: mono ? "tabular-nums" : undefined, whiteSpace: "nowrap" }}>{children}</td>;
 }
-
 function ActiveBadge() {
   return <span style={{ display: "inline-flex", padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 500, background: C.sage, color: C.surface }}>Активен</span>;
 }
-
-function InactiveBadge() {
-  return <span style={{ display: "inline-flex", padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 500, background: C.ivory, color: C.textLt }}>Неактивен</span>;
-}
-
 function FieldLabel({ children }: { children: React.ReactNode }) {
   return <label style={{ fontSize: 12, fontWeight: 500, color: C.textLt, display: "block", marginBottom: 6 }}>{children}</label>;
 }
-
-function IconBtn({ children, title, hoverColor, onClick }: { children: React.ReactNode; title: string; hoverColor: string; onClick: () => void }) {
-  const [hov, setHov] = useState(false);
-  return (
-    <button title={title} onClick={onClick} onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}
-      style={{ background: "none", border: "none", cursor: "pointer", color: hov ? hoverColor : C.olive, padding: 2, display: "flex", borderRadius: 4, transition: "color 0.15s" }}>
-      {children}
-    </button>
-  );
-}
-
-function ReadOnlyActions() {
-  return (
-    <div style={{ display: "flex", gap: 6 }}>
-      <IconBtn title="Редактировать" hoverColor={C.sage} onClick={() => {}}>
-        <Pencil size={14} />
-      </IconBtn>
-      <IconBtn title="Удалить" hoverColor={C.danger} onClick={() => {}}>
-        <Trash2 size={14} />
-      </IconBtn>
-    </div>
-  );
-}
-
 function ErrSpan({ children }: { children: string }) {
   return <span style={{ fontSize: 11, color: "var(--tm-danger)", marginTop: 4, display: "block" }}>{children}</span>;
 }
-function Req() {
-  return <span style={{ color: "var(--tm-danger)", marginLeft: 2 }}>*</span>;
+function ActionBtns({ onEdit, onDel }: { onEdit: () => void; onDel: () => void }) {
+  return (
+    <div style={{ display: "flex", gap: 6 }}>
+      <IconBtn title="Редактировать" hoverColor={C.sage} onClick={onEdit}><Pencil size={14} /></IconBtn>
+      <IconBtn title="Удалить" hoverColor={C.danger} onClick={onDel}><Trash2 size={14} /></IconBtn>
+    </div>
+  );
 }
+function IconBtn({ children, title, hoverColor, onClick }: { children: React.ReactNode; title: string; hoverColor: string; onClick: () => void }) {
+  const [hov, setHov] = useState(false);
+  return <button title={title} onClick={onClick} onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)} style={{ background: "none", border: "none", cursor: "pointer", color: hov ? hoverColor : C.olive, padding: 2, display: "flex", borderRadius: 4, transition: "color 0.15s" }}>{children}</button>;
+}
+function Dash() {
+  return <span style={{ fontSize: 12, color: C.textLt }}>—</span>;
+}
+
+const addBtnStyle: React.CSSProperties = { display: "flex", alignItems: "center", gap: 6, padding: "7px 16px", borderRadius: 6, background: C.sage, color: C.surface, border: "none", fontSize: 13, fontWeight: 500, cursor: "pointer", fontFamily: "Inter, sans-serif" };
+const saveBtnStyle: React.CSSProperties = { padding: "9px 20px", borderRadius: 6, background: C.sage, color: C.surface, border: "none", fontSize: 14, fontWeight: 500, cursor: "pointer", fontFamily: "Inter, sans-serif" };
+const cancelBtnStyle: React.CSSProperties = { padding: "9px 12px", borderRadius: 6, background: "transparent", color: C.olive, border: "none", fontSize: 14, fontWeight: 500, cursor: "pointer", fontFamily: "Inter, sans-serif", marginLeft: "auto" };
+const overlayStyle: React.CSSProperties = { position: "fixed", inset: 0, background: C.overlay, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, fontFamily: "Inter, sans-serif" };
+const modalStyle: React.CSSProperties = { width: 480, background: C.surface, border: `1px solid ${C.warm}`, borderRadius: 12, boxShadow: "0 4px 24px rgba(44,44,30,0.18)", display: "flex", flexDirection: "column" };
+const closeBtnStyle: React.CSSProperties = { background: "none", border: "none", cursor: "pointer", color: C.textLt, display: "flex", padding: 4, borderRadius: 4 };

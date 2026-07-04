@@ -16,6 +16,8 @@ return new class extends Migration
             $table->foreignId('counterparty_id')->constrained()->onDelete('restrict');
             $table->foreignId('item_id')->constrained()->onDelete('restrict');
             $table->string('purpose')->nullable();
+            $table->boolean('recurring')->default(false);
+            $table->enum('recurring_frequency', ['monthly', 'weekly', 'quarterly'])->nullable();
             $table->enum('priority', ['high', 'medium', 'low'])->default('medium');
             $table->enum('status', ['draft', 'pending', 'approved', 'rejected', 'in_registry', 'paid'])->default('draft');
             $table->foreignId('created_by')->constrained('users')->onDelete('restrict');
