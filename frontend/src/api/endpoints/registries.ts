@@ -51,7 +51,7 @@ const mock = {
     store = store.map(r => r.id === id ? { ...r, status: "paid" as RegistryStatus } : r);
     return delay(store.find(r => r.id === id)!);
   },
-  export: (_id: number) => delay(new Blob(["id;counterparty;amount\n"], { type: "text/csv" })),
+  export: (id: number) => client.get(`/registries/${id}/export`, { responseType: 'blob' }).then(r => r.data),
 };
 
 export const registriesService = USE_MOCK ? mock : real;

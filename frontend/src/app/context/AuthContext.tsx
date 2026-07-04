@@ -1,4 +1,5 @@
-import { createContext, useContext, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { authService } from "../../api/endpoints/auth";
 
 export type Role = "initiator" | "treasurer" | "manager" | "admin";
 
@@ -7,16 +8,8 @@ export interface AuthUser {
   name: string;
   email: string;
   role: Role;
-  avatar: string; // инициалы для заглушки аватара (обязательно)
+  avatar: string;
 }
-
-// ── Демо-пользователи (используются для отображения в интерфейсе LoginScreen) ──
-export const DEMO_USERS: AuthUser[] = [
-  { id: 1, name: "Иванова М.С.",  email: "m.ivanova@truemachine.ru",  role: "initiator", avatar: "ИМ" },
-  { id: 2, name: "Петров И.А.",   email: "i.petrov@truemachine.ru",   role: "treasurer", avatar: "ПИ" },
-  { id: 3, name: "Козлова Е.В.",  email: "e.kozlova@truemachine.ru",  role: "manager",   avatar: "КЕ" },
-  { id: 4, name: "Сидоров А.К.",  email: "a.sidorov@truemachine.ru",  role: "admin",     avatar: "СА" },
-];
 
 export const ROLE_LABELS: Record<Role, string> = {
   initiator: "Инициатор",
@@ -58,6 +51,7 @@ export const ROLE_PERMS: Record<Role, Permissions> = {
 interface AuthContextType {
   user: AuthUser | null;
   isAuthed: boolean;
+  initializing: boolean;
   perms: Permissions;
   login: (email: string, password: string) => Promise<{ ok: boolean; error?: string }>;
   logout: () => void;
@@ -70,7 +64,7 @@ const EMPTY_PERMS: Permissions = {
 };
 
 const AuthContext = createContext<AuthContextType>({
-  user: null, isAuthed: false, perms: EMPTY_PERMS,
+  user: null, isAuthed: false, initializing: true, perms: EMPTY_PERMS,
   login: async () => ({ ok: false }),
   logout: () => {},
   updateUser: () => {},
@@ -79,13 +73,37 @@ const AuthContext = createContext<AuthContextType>({
 const USER_STORAGE_KEY = "tm_auth_user";
 const TOKEN_STORAGE_KEY = "tm_auth_token";
 
+const ROLES: Role[] = ["initiator", "treasurer", "manager", "admin"];
+
+export function nameToAvatar(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) {
+    return (parts[0][0] + parts[1][0]).toUpperCase();
+  }
+  return name.slice(0, 2).toUpperCase();
+}
+
+function toAuthUser(raw: { id: number; name: string; email: string; role: string }): AuthUser {
+  const role = ROLES.includes(raw.role as Role) ? (raw.role as Role) : "initiator";
+  return {
+    id: raw.id,
+    name: raw.name,
+    email: raw.email,
+    role,
+    avatar: nameToAvatar(raw.name),
+  };
+}
+
+function authErrorMessage(err: unknown): string {
+  const axiosErr = err as { response?: { data?: { message?: string }; status?: number } };
+  if (axiosErr.response?.data?.message) return axiosErr.response.data.message;
+  if (axiosErr.response?.status === 401) return "Неверный email или пароль";
+  return "Сетевая ошибка. Проверьте подключение к серверу.";
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<AuthUser | null>(() => {
-    try {
-      const raw = localStorage.getItem(USER_STORAGE_KEY);
-      return raw ? JSON.parse(raw) : null;
-    } catch { return null; }
-  });
+  const [user, setUser] = useState<AuthUser | null>(null);
+  const [initializing, setInitializing] = useState(true);
 
   const persist = (u: AuthUser | null, token?: string) => {
     if (u && token) {
@@ -98,42 +116,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(u);
   };
 
-  // РЕАЛЬНЫЙ ЗАПРОС К БЭКЕНДУ
+  useEffect(() => {
+    const token = localStorage.getItem(TOKEN_STORAGE_KEY);
+    if (!token) {
+      setInitializing(false);
+      return;
+    }
+
+    authService.me()
+      .then(data => persist(toAuthUser(data as { id: number; name: string; email: string; role: string }), token))
+      .catch(() => persist(null))
+      .finally(() => setInitializing(false));
+  }, []);
+
   const login = async (email: string, password: string) => {
     try {
-      const response = await fetch("/api/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        return { ok: false, error: data.message || "Ошибка входа" };
-      }
-
-      const { token, user } = data;
-      if (!token || !user) {
-        return { ok: false, error: "Неверный ответ сервера" };
-      }
-
-      persist(user, token);
+      const { token, user: apiUser } = await authService.login({ email, password });
+      persist(toAuthUser(apiUser), token);
       return { ok: true };
     } catch (err) {
-      console.error("Ошибка при логине:", err);
-      return { ok: false, error: "Сетевая ошибка. Проверьте подключение к серверу." };
+      return { ok: false, error: authErrorMessage(err) };
     }
   };
 
   const logout = () => {
-    persist(null);
-    // Можно также отправить запрос на /api/logout, но для простоты удаляем локально
+    authService.logout().catch(() => {}).finally(() => persist(null));
   };
 
   const updateUser = (patch: Partial<Pick<AuthUser, "name" | "email">>) => {
     if (!user) return;
-    const updated = { ...user, ...patch };
+    const updated: AuthUser = {
+      ...user,
+      ...patch,
+      avatar: patch.name ? nameToAvatar(patch.name) : user.avatar,
+    };
     const token = localStorage.getItem(TOKEN_STORAGE_KEY);
     if (token) persist(updated, token);
   };
@@ -142,7 +158,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const isAuthed = Boolean(user && localStorage.getItem(TOKEN_STORAGE_KEY));
 
   return (
-    <AuthContext.Provider value={{ user, isAuthed, perms, login, logout, updateUser }}>
+    <AuthContext.Provider value={{ user, isAuthed, initializing, perms, login, logout, updateUser }}>
       {children}
     </AuthContext.Provider>
   );

@@ -1,21 +1,8 @@
-/**
- * paymentsService — заявки на платёж.
- *
- * Бэкенд должен реализовать:
- *   GET    /api/payments                    → Payment[] (с фильтрами)
- *   POST   /api/payments                    → Payment
- *   PUT    /api/payments/{id}               → Payment
- *   DELETE /api/payments/{id}               → { message }
- *   POST   /api/payments/{id}/submit        → Payment (status → pending)
- *   POST   /api/payments/{id}/approve       → Payment (status → approved)
- *   POST   /api/payments/{id}/reject        → Payment (status → rejected)
- *   POST   /api/payments/{id}/move          → Payment (новая planned_date)
- */
-
 import client from "../client";
 import { delay, randomId } from "../mocks/handlers";
 import { mockPayments, type Payment, type PaymentStatus } from "../mocks/data/payments";
 import { USE_MOCK } from "../../config";
+import { kopecksToRub, rubToKopecks } from "../../app/utils";
 
 export interface PaymentsFilter {
   status?:          PaymentStatus;
@@ -25,18 +12,127 @@ export interface PaymentsFilter {
   date_to?:         string;
 }
 
+interface ApiPayment {
+  id: number;
+  amount: number;
+  planned_date: string;
+  account?: { id: number; name: string };
+  counterparty?: { id: number; name: string };
+  item?: { id: number; name: string; type: string };
+  created_by?: { id: number; name: string };
+  account_id?: number;
+  account_name?: string;
+  counterparty_id?: number;
+  counterparty_name?: string;
+  item_id?: number;
+  item_name?: string;
+  created_by_id?: number;
+  created_by_name?: string;
+  purpose: string | null;
+  priority: "high" | "medium" | "low";
+  status: PaymentStatus;
+  registry_id: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+function mapApiPayment(api: ApiPayment): Payment {
+  const accountId = api.account?.id ?? api.account_id ?? 0;
+  const accountName = api.account?.name ?? api.account_name ?? "";
+  const counterpartyId = api.counterparty?.id ?? api.counterparty_id ?? 0;
+  const counterpartyName = api.counterparty?.name ?? api.counterparty_name ?? "";
+  const itemId = api.item?.id ?? api.item_id ?? 0;
+  const itemName = api.item?.name ?? api.item_name ?? "";
+  const createdById = api.created_by?.id ?? api.created_by_id ?? 0;
+  const createdByName = api.created_by?.name ?? api.created_by_name ?? "";
+
+  return {
+    id: api.id,
+    amount: kopecksToRub(api.amount),
+    planned_date: api.planned_date,
+    account_id: accountId,
+    account_name: accountName,
+    counterparty_id: counterpartyId,
+    counterparty: counterpartyName,
+    item_id: itemId,
+    item: itemName,
+    purpose: api.purpose || "",
+    priority: api.priority,
+    status: api.status,
+    created_by: createdById,
+    creator_name: createdByName,
+    registry_id: api.registry_id,
+    created_at: api.created_at,
+    updated_at: api.updated_at,
+  };
+}
+
+export type PaymentCreateData = Omit<Payment, "id" | "status" | "created_at" | "updated_at">;
+
 let store: Payment[] = [...mockPayments];
 
 const real = {
-  getAll:   (f?: PaymentsFilter)                    => client.get<Payment[]>("/payments", { params: f }).then(r => r.data),
-  getOne:   (id: number)                            => client.get<Payment>(`/payments/${id}`).then(r => r.data),
-  create:   (data: Omit<Payment, "id" | "status" | "created_at">) => client.post<Payment>("/payments", data).then(r => r.data),
-  update:   (id: number, data: Partial<Payment>)    => client.put<Payment>(`/payments/${id}`, data).then(r => r.data),
-  delete:   (id: number)                            => client.delete(`/payments/${id}`).then(r => r.data),
-  submit:   (id: number)                            => client.post<Payment>(`/payments/${id}/submit`).then(r => r.data),
-  approve:  (id: number)                            => client.post<Payment>(`/payments/${id}/approve`).then(r => r.data),
-  reject:   (id: number, comment: string)           => client.post<Payment>(`/payments/${id}/reject`, { comment }).then(r => r.data),
-  move:     (id: number, planned_date: string)      => client.post<Payment>(`/payments/${id}/move`, { planned_date }).then(r => r.data),
+  getAll: (f?: PaymentsFilter) =>
+    client.get<ApiPayment[]>("/payments", { params: f })
+      .then(r => r.data.map(mapApiPayment)),
+
+  getOne: (id: number) =>
+    client.get<ApiPayment>(`/payments/${id}`)
+      .then(r => mapApiPayment(r.data)),
+
+  create: (data: Omit<Payment, "id" | "status" | "created_at" | "updated_at">) => {
+    const payload = {
+      amount: rubToKopecks(data.amount),
+      planned_date: data.planned_date,
+      account_id: data.account_id,
+      counterparty_id: data.counterparty_id,
+      item_id: data.item_id,
+      purpose: data.purpose,
+      priority: data.priority,
+    };
+    console.log("📤 Создание платежа, payload:", payload);
+    return client.post<ApiPayment>("/payments", payload)
+      .then(r => {
+        console.log("📥 Ответ сервера (создание):", r.data);
+        return mapApiPayment(r.data);
+      });
+  },
+
+  update: (id: number, data: Partial<Payment>) => {
+    const payload: any = {};
+    if (data.amount !== undefined) payload.amount = rubToKopecks(data.amount);
+    if (data.planned_date !== undefined) payload.planned_date = data.planned_date;
+    if (data.account_id !== undefined) payload.account_id = data.account_id;
+    if (data.counterparty_id !== undefined) payload.counterparty_id = data.counterparty_id;
+    if (data.item_id !== undefined) payload.item_id = data.item_id;
+    if (data.purpose !== undefined) payload.purpose = data.purpose;
+    if (data.priority !== undefined) payload.priority = data.priority;
+    if (data.status !== undefined) payload.status = data.status;
+    console.log("📤 Обновление платежа, payload:", payload);
+    return client.put<ApiPayment>(`/payments/${id}`, payload)
+      .then(r => {
+        console.log("📥 Ответ сервера (обновление):", r.data);
+        return mapApiPayment(r.data);
+      });
+  },
+
+  delete: (id: number) => client.delete(`/payments/${id}`).then(r => r.data),
+
+  submit: (id: number) =>
+    client.post<ApiPayment>(`/payments/${id}/submit`)
+      .then(r => mapApiPayment(r.data)),
+
+  approve: (id: number) =>
+    client.post<ApiPayment>(`/payments/${id}/approve`)
+      .then(r => mapApiPayment(r.data)),
+
+  reject: (id: number, comment: string) =>
+    client.post<ApiPayment>(`/payments/${id}/reject`, { comment })
+      .then(r => mapApiPayment(r.data)),
+
+  move: (id: number, planned_date: string) =>
+    client.post<ApiPayment>(`/payments/${id}/move`, { planned_date })
+      .then(r => mapApiPayment(r.data)),
 };
 
 const setStatus = (id: number, status: PaymentStatus): Payment => {

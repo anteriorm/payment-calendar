@@ -79,7 +79,6 @@ export function Sidebar({ current, onChange, allowedScreens }: SidebarProps) {
 
         <div style={{ margin: "8px 20px", height: 1, background: "rgba(250,250,245,0.20)" }} />
 
-        {/* ── Logout — STUB: замените на DELETE /api/auth/logout ── */}
         <button
           onClick={logout}
           style={{

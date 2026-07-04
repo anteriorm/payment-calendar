@@ -5,16 +5,30 @@ namespace App\Http\Controllers;
 use App\Models\Registry;
 use App\Models\Payment;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Auth;
 
 class RegistryController extends Controller
 {
+    private function formatRegistry(Registry $registry): array
+    {
+        return [
+            'id' => $registry->id,
+            'registry_date' => $registry->registry_date?->toDateString() ?? '',
+            'status' => $registry->status,
+            'payment_ids' => $registry->payments->pluck('id')->toArray(),
+            'total_amount' => $registry->payments->sum('amount'),
+            'created_by' => $registry->creator?->name ?? '',
+            'approved_by' => $registry->approver?->name ?? null,
+            'created_at' => $registry->created_at?->toIso8601String() ?? '',
+        ];
+    }
+
     public function index()
     {
         $registries = Registry::with(['payments', 'creator', 'approver'])
-            ->orderBy('registry_date', 'desc')
-            ->get();
+            ->orderBy('created_at', 'desc')
+            ->get()
+            ->map(fn($r) => $this->formatRegistry($r));
+
         return response()->json($registries);
     }
 
@@ -26,8 +40,8 @@ class RegistryController extends Controller
             'payment_ids.*' => 'exists:payments,id',
         ]);
 
-        // Проверяем, что все платежи согласованы
         $payments = Payment::whereIn('id', $request->payment_ids)->get();
+
         foreach ($payments as $payment) {
             if ($payment->status !== 'approved') {
                 return response()->json([
@@ -41,31 +55,41 @@ class RegistryController extends Controller
             }
         }
 
-        // Создаём реестр
         $registry = Registry::create([
             'registry_date' => $request->registry_date,
             'status' => 'created',
-            'created_by' => Auth::id(),
+            'created_by' => auth()->id(),
         ]);
 
-        // Привязываем платежи
         foreach ($payments as $payment) {
             $payment->registry_id = $registry->id;
             $payment->status = 'in_registry';
             $payment->save();
         }
 
-        $registry->load('payments');
-        return response()->json($registry, 201);
+        $registry->load(['payments', 'creator', 'approver']);
+        return response()->json($this->formatRegistry($registry), 201);
     }
 
     public function show(Registry $registry)
     {
-        $registry->load(['payments', 'creator', 'approver']);
-        return response()->json($registry);
+        $registry->load(['payments.account', 'payments.counterparty', 'payments.item', 'creator', 'approver']);
+
+        $result = $this->formatRegistry($registry);
+        $result['payments'] = $registry->payments->map(fn($p) => [
+            'id' => $p->id,
+            'counterparty' => $p->counterparty?->name ?? '',
+            'article' => $p->item?->name ?? '',
+            'amount' => $p->amount,
+            'account' => $p->account?->name ?? '',
+            'date' => $p->planned_date?->toDateString() ?? '',
+            'priority' => $p->priority,
+            'status' => $p->status,
+        ]);
+
+        return response()->json($result);
     }
 
-    // Отметка оплаты реестра
     public function pay(Registry $registry)
     {
         if ($registry->status === 'paid') {
@@ -73,22 +97,21 @@ class RegistryController extends Controller
         }
 
         $registry->status = 'paid';
-        $registry->approved_by = Auth::id();
+        $registry->approved_by = auth()->id();
         $registry->save();
 
-        // Меняем статусы платежей
         foreach ($registry->payments as $payment) {
             $payment->status = 'paid';
             $payment->save();
         }
 
-        return response()->json(['message' => 'Реестр оплачен', 'registry' => $registry]);
+        $registry->load(['payments', 'creator', 'approver']);
+        return response()->json(['message' => 'Реестр оплачен', 'registry' => $this->formatRegistry($registry)]);
     }
 
-    // Экспорт CSV
     public function export(Registry $registry)
     {
-        $registry->load('payments.account', 'payments.counterparty', 'payments.item');
+        $registry->load(['payments.account', 'payments.counterparty', 'payments.item']);
 
         $rows = [];
         $rows[] = ['ID', 'Дата', 'Контрагент', 'Сумма', 'Счёт', 'Статья', 'Назначение', 'Статус'];
@@ -98,7 +121,7 @@ class RegistryController extends Controller
                 $payment->id,
                 $payment->planned_date,
                 $payment->counterparty->name ?? '',
-                $payment->amount / 100, // в рублях
+                $payment->amount / 100,
                 $payment->account->name ?? '',
                 $payment->item->name ?? '',
                 $payment->purpose ?? '',
@@ -106,7 +129,6 @@ class RegistryController extends Controller
             ];
         }
 
-        // Генерируем CSV
         $filename = "registry_{$registry->id}_{$registry->registry_date}.csv";
         $handle = fopen('php://temp', 'w+');
         foreach ($rows as $row) {

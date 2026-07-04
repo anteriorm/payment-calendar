@@ -18,6 +18,8 @@ class Payment extends Model
         'counterparty_id',
         'item_id',
         'purpose',
+        'recurring',
+        'recurring_frequency',
         'priority',
         'status',
         'created_by',
@@ -27,6 +29,7 @@ class Payment extends Model
     protected $casts = [
         'amount' => 'integer',
         'planned_date' => 'date',
+        'recurring' => 'boolean',
     ];
 
     public function account()

@@ -20,6 +20,8 @@ services:
       - DB_DATABASE=payment_calendar
       - DB_USERNAME=postgres
       - DB_PASSWORD=postgres
+      - FRONTEND_URL=http://localhost:5173
+      - SANCTUM_STATEFUL_DOMAINS=localhost:5173,localhost,127.0.0.1
     depends_on:
       - postgres
 
@@ -31,7 +33,9 @@ services:
     ports:
       - "5173:5173"
     environment:
-      - VITE_API_URL=http://localhost:8000/api
+      - VITE_API_URL=/api
+      - VITE_PROXY_TARGET=http://backend:8000
+      - VITE_USE_MOCK=false
     depends_on:
       - backend
 

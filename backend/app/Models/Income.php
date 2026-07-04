@@ -17,6 +17,7 @@ class Income extends Model
         'item_id',
         'purpose',
         'status',
+        'created_by',
     ];
 
     protected $casts = [
@@ -37,5 +38,10 @@ class Income extends Model
     public function item()
     {
         return $this->belongsTo(Item::class);
+    }
+
+    public function creator()
+    {
+        return $this->belongsTo(User::class, 'created_by');
     }
 }

@@ -14,7 +14,12 @@ class Counterparty extends Model
     protected $fillable = [
         'name',
         'inn',
-        'details',
+        'kpp',
+        'bank_account',
+        'bank_name',
+        'bik',
+        'type',
+        'contact',
     ];
 
     public function payments()

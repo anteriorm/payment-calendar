@@ -4,14 +4,55 @@ namespace App\Http\Controllers;
 
 use App\Models\Income;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 
 class IncomeController extends Controller
 {
-    public function index()
+    private function formatIncome(Income $income): array
     {
-        $incomes = Income::with(['account', 'counterparty', 'item'])
-            ->orderBy('planned_date', 'asc')
-            ->get();
+        return [
+            'id' => $income->id,
+            'amount' => $income->amount,
+            'planned_date' => $income->planned_date->toDateString(),
+            'account_id' => $income->account_id,
+            'account_name' => $income->account?->name ?? '',
+            'counterparty_id' => $income->counterparty_id,
+            'counterparty' => $income->counterparty?->name ?? '',
+            'item_id' => $income->item_id,
+            'item' => $income->item?->name ?? '',
+            'purpose' => $income->purpose ?? '',
+            'status' => $income->status,
+            'created_by' => $income->creator?->name ?? '',
+        ];
+    }
+
+    public function index(Request $request)
+    {
+        $query = Income::with(['account', 'counterparty', 'item', 'creator'])
+            ->orderBy('planned_date', 'asc');
+
+        if ($request->filled('status')) {
+            $query->where('status', $request->status);
+        }
+
+        if ($request->filled('account_id')) {
+            $query->where('account_id', $request->account_id);
+        }
+
+        if ($request->filled('counterparty_id')) {
+            $query->where('counterparty_id', $request->counterparty_id);
+        }
+
+        if ($request->filled('date_from')) {
+            $query->where('planned_date', '>=', $request->date_from);
+        }
+
+        if ($request->filled('date_to')) {
+            $query->where('planned_date', '<=', $request->date_to);
+        }
+
+        $incomes = $query->get()->map(fn($income) => $this->formatIncome($income));
+
         return response()->json($incomes);
     }
 
@@ -24,19 +65,21 @@ class IncomeController extends Controller
             'counterparty_id' => 'required|exists:counterparties,id',
             'item_id' => 'required|exists:items,id',
             'purpose' => 'nullable|string',
-            'status' => 'sometimes|in:planned,received,canceled',
+            'status' => 'sometimes|in:planned,confirmed,received,canceled',
         ]);
 
         $validated['status'] = $validated['status'] ?? 'planned';
 
         $income = Income::create($validated);
-        return response()->json($income, 201);
+        $income->load(['account', 'counterparty', 'item']);
+
+        return response()->json($this->formatIncome($income), 201);
     }
 
     public function show(Income $income)
     {
-        $income->load(['account', 'counterparty', 'item']);
-        return response()->json($income);
+        $income->load(['account', 'counterparty', 'item', 'creator']);
+        return response()->json($this->formatIncome($income));
     }
 
     public function update(Request $request, Income $income)
@@ -48,11 +91,13 @@ class IncomeController extends Controller
             'counterparty_id' => 'sometimes|exists:counterparties,id',
             'item_id' => 'sometimes|exists:items,id',
             'purpose' => 'sometimes|nullable|string',
-            'status' => 'sometimes|in:planned,received,canceled',
+            'status' => 'sometimes|in:planned,confirmed,received,canceled',
         ]);
 
         $income->update($validated);
-        return response()->json($income);
+        $income->load(['account', 'counterparty', 'item', 'creator']);
+
+        return response()->json($this->formatIncome($income));
     }
 
     public function destroy(Income $income)
@@ -65,15 +110,42 @@ class IncomeController extends Controller
         return response()->json(['message' => 'Поступление удалено']);
     }
 
-    // Отметка как полученное
-    public function markReceived(Income $income)
+    public function markConfirmed(Income $income)
     {
         if ($income->status !== 'planned') {
-            return response()->json(['message' => 'Только плановые поступления можно отметить как полученные'], 403);
+            return response()->json(['message' => 'Только плановые поступления можно подтвердить'], 403);
+        }
+
+        $income->status = 'confirmed';
+        $income->save();
+        $income->load(['account', 'counterparty', 'item', 'creator']);
+
+        return response()->json(['message' => 'Поступление подтверждено', 'income' => $this->formatIncome($income)]);
+    }
+
+    public function markReceived(Income $income)
+    {
+        if (!in_array($income->status, ['planned', 'confirmed'])) {
+            return response()->json(['message' => 'Только плановые или подтверждённые поступления можно отметить как полученные'], 403);
         }
 
         $income->status = 'received';
         $income->save();
-        return response()->json(['message' => 'Поступление отмечено как полученное', 'income' => $income]);
+        $income->load(['account', 'counterparty', 'item', 'creator']);
+
+        return response()->json(['message' => 'Поступление отмечено как полученное', 'income' => $this->formatIncome($income)]);
+    }
+
+    public function cancel(Income $income)
+    {
+        if (in_array($income->status, ['received', 'canceled'])) {
+            return response()->json(['message' => 'Это поступление нельзя отменить'], 403);
+        }
+
+        $income->status = 'canceled';
+        $income->save();
+        $income->load(['account', 'counterparty', 'item', 'creator']);
+
+        return response()->json(['message' => 'Поступление отменено', 'income' => $this->formatIncome($income)]);
     }
 }

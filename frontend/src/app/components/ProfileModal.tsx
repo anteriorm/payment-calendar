@@ -4,6 +4,7 @@ import { C } from "../tokens";
 import { useAuth, ROLE_LABELS } from "../context/AuthContext";
 import { useToast } from "./Toast";
 import { required, email as validateEmail, passwordStrength, passwordMatch } from "../utils/validation";
+import * as api from "../../api";
 
 interface ProfileModalProps {
   onClose: () => void;
@@ -53,10 +54,11 @@ export function ProfileModal({ onClose }: ProfileModalProps) {
     }
     if (Object.keys(e).length) { setErrors(e); return; }
     setErrors({});
-    updateUser({ name: name.trim() || user.name, email: email.trim() || user.email });
-    // STUB: PATCH /api/users/me { name, email, password }
-    showToast("Профиль обновлён", "success");
-    onClose();
+    const payload: any = { name: name.trim() || user.name, email: email.trim() || user.email };
+    if (password) payload.password = password;
+    api.users.update(user.id, payload)
+      .then(() => { updateUser({ name: payload.name, email: payload.email }); showToast("Профиль обновлён", "success"); onClose(); })
+      .catch(() => showToast("Ошибка обновления профиля", "error"));
   };
 
   const rc: Record<string, { bg: string; color: string }> = {

@@ -10,6 +10,9 @@ use App\Http\Controllers\IncomeController;
 use App\Http\Controllers\CalendarController;
 use App\Http\Controllers\RegistryController;
 use App\Http\Controllers\ReportController;
+use App\Http\Controllers\AuditController;
+use App\Http\Controllers\UserController;
+use App\Http\Controllers\ImportController;
 
 Route::post('/login', [AuthController::class, 'login']);
 
@@ -32,8 +35,10 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/payments/{payment}/reject', [PaymentController::class, 'reject']);
     Route::post('/payments/{payment}/move', [PaymentController::class, 'move']);
 
-    // Отметка поступления как полученного
+    // Действия с поступлениями
+    Route::post('/incomes/{income}/confirmed', [IncomeController::class, 'markConfirmed']);
     Route::post('/incomes/{income}/received', [IncomeController::class, 'markReceived']);
+    Route::post('/incomes/{income}/cancel', [IncomeController::class, 'cancel']);
 
     // Календарь
     Route::get('/calendar', [CalendarController::class, 'index']);
@@ -46,4 +51,14 @@ Route::middleware('auth:sanctum')->group(function () {
     // Отчёты
     Route::get('/reports/balances', [ReportController::class, 'balances']);
     Route::get('/reports/cash-gaps', [ReportController::class, 'cashGaps']);
+    Route::get('/reports/plan-fact', [ReportController::class, 'planFact']);
+
+    // Аудит
+    Route::get('/audit', [AuditController::class, 'index']);
+
+    // Импорт
+    Route::post('/import/payments', [ImportController::class, 'importPayments']);
+
+    // Пользователи (admin)
+    Route::apiResource('users', UserController::class);
 });

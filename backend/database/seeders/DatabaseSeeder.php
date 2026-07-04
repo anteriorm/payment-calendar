@@ -13,6 +13,8 @@ class DatabaseSeeder extends Seeder
             AccountSeeder::class,
             CounterpartySeeder::class,
             ItemSeeder::class,
+            PaymentSeeder::class,
+            IncomeSeeder::class,
         ]);
     }
 }
