@@ -1,26 +1,30 @@
-import { useState } from "react";
-import { X, Calendar, Search, ChevronDown } from "lucide-react";
+import { useState, useEffect, type CSSProperties, type ReactNode } from "react";
+import { X, Calendar, Search, ChevronDown, GitBranch } from "lucide-react";
 import { useToast } from "./Toast";
 import { C } from "../tokens";
+import { rubToKopecks, getAccountCurrency, getCurrencySymbol } from "../utils";
+import * as api from "../../api";
+import type { ApprovalRoute } from "../../api";
 
 export interface ModalRequestData {
   id?:           number;
   amount?:       string;
   date?:         string;
+  routeId?:      number;
   account?:      string;
   counterparty?: string;
   article?:      string;
   purpose?:      string;
   priority?:     Priority;
+  recurring?:    boolean;
+  frequency?:    Frequency;
+  endDate?:      string;
 }
 
 interface CreateRequestModalProps {
-  onClose:        () => void;
-  initialData?:   ModalRequestData;
-  onSave?:        (data: ModalRequestData, asDraft: boolean) => void;
-  accounts?:      { id: number; name: string; type?: string; currency?: string; initial_balance?: number }[];
-  counterparties?: { id: number; name: string; inn?: string; details?: string }[];
-  items?:         { id: number; name: string; type: string }[];
+  onClose:      () => void;
+  initialData?: ModalRequestData;
+  onSave?:      (data: ModalRequestData, asDraft: boolean) => void;
 }
 
 type Priority  = "high" | "medium" | "low";
@@ -32,19 +36,34 @@ const PRIORITIES: { value: Priority; label: string; dot: string; accent: string;
   { value: "low",    label: "Низкий",  dot: C.sage,   accent: C.sage,    bg: C.sage10                 },
 ];
 
-export function CreateRequestModal({
-  onClose,
-  initialData,
-  onSave,
-  accounts = [],
-  counterparties = [],
-  items = [],
-}: CreateRequestModalProps) {
+const ACCOUNTS = [
+  { value: "Расчётный №1", label: "Расчётный счёт №1 (RUB)" },
+  { value: "Расчётный №2", label: "Расчётный счёт №2 (USD)" },
+  { value: "Касса",        label: "Касса (RUB)"              },
+];
+
+const ARTICLES = [
+  { value: "Аренда офиса",        label: "Аренда офиса"          },
+  { value: "Заработная плата",     label: "Заработная плата"       },
+  { value: "Расходные материалы",  label: "Расходные материалы"    },
+  { value: "Услуги подрядчиков",   label: "Услуги подрядчиков"     },
+  { value: "Налоги и сборы",       label: "Налоги и сборы"         },
+];
+
+const COUNTERPARTIES = [
+  "ООО Поставщик Альфа",
+  "ИП Смирнов А.В.",
+  "АО ТехСервис",
+  "ООО РентаГрупп",
+  "ПАО Энергоресурс",
+];
+
+export function CreateRequestModal({ onClose, initialData, onSave }: CreateRequestModalProps) {
   const { showToast } = useToast();
   const isEdit = Boolean(initialData?.id);
 
   const [amount,       setAmount]       = useState(initialData?.amount       ?? "");
-  const [date,         setDate]         = useState(initialData?.date         ?? (() => { const d = new Date(); return `${String(d.getDate()).padStart(2,"0")}.${String(d.getMonth()+1).padStart(2,"0")}.${d.getFullYear()}`; })());
+  const [date,         setDate]         = useState(initialData?.date         ?? "26.06.2026");
   const [account,      setAccount]      = useState(initialData?.account      ?? "");
   const [counterparty, setCounterparty] = useState(initialData?.counterparty ?? "");
   const [cpOpen,       setCpOpen]       = useState(false);
@@ -56,6 +75,16 @@ export function CreateRequestModal({
   const [endDate,      setEndDate]      = useState("");
   const [focusedField, setFocusedField] = useState<string | null>(null);
   const [errors,       setErrors]       = useState<Record<string, string>>({});
+  const [routes,       setRoutes]       = useState<ApprovalRoute[]>([]);
+  const [selectedRoute,setSelectedRoute]= useState<number>(1);
+
+  useEffect(() => {
+    api.approvals.getRoutes().then(r => {
+      const rs = r as ApprovalRoute[];
+      setRoutes(rs);
+      if (rs.length) setSelectedRoute(rs[0].id);
+    });
+  }, []);
 
   const validate = (): boolean => {
     const e: Record<string, string> = {};
@@ -74,13 +103,13 @@ export function CreateRequestModal({
     return Object.keys(e).length === 0;
   };
 
-  const focusStyle = (name: string): React.CSSProperties => {
+  const focusStyle = (name: string): CSSProperties => {
     if (errors[name]) return { border: `1.5px solid ${C.danger}`, boxShadow: `0 0 0 3px rgba(192,80,74,0.15)` };
     if (focusedField === name) return { border: `1.5px solid ${C.sage}`, boxShadow: `0 0 0 3px ${C.sage20}` };
     return { border: `1px solid ${C.warm}` };
   };
 
-  const baseInput: React.CSSProperties = {
+  const baseInput: CSSProperties = {
     width: "100%",
     padding: "9px 12px",
     borderRadius: 6,
@@ -93,14 +122,9 @@ export function CreateRequestModal({
     transition: "border 0.15s, box-shadow 0.15s",
   };
 
-  const accountOptions = accounts.map(a => ({ value: a.name, label: a.name }));
-  const counterpartyNames = counterparties.map(c => c.name);
   const filteredCp = counterparty
-    ? counterpartyNames.filter(c => c.toLowerCase().includes(counterparty.toLowerCase()))
-    : counterpartyNames;
-  const articleOptions = items
-    .filter(i => i.type === 'payment')
-    .map(i => ({ value: i.name, label: i.name }));
+    ? COUNTERPARTIES.filter(c => c.toLowerCase().includes(counterparty.toLowerCase()))
+    : COUNTERPARTIES;
 
   const title = isEdit ? `Редактировать заявку № ${initialData!.id}` : "Новая заявка на платёж";
   const submitLabel = isEdit ? "Сохранить изменения" : "Отправить на согласование";
@@ -114,7 +138,7 @@ export function CreateRequestModal({
         onClick={e => e.stopPropagation()}
         style={{ width: 600, maxHeight: "92vh", background: C.surface, border: `1px solid ${C.warm}`, borderRadius: 12, display: "flex", flexDirection: "column", boxShadow: "0 4px 24px rgba(44,44,30,0.18)" }}
       >
-        {/* Header */}
+        {/* ── Header ── */}
         <div style={{ padding: "20px 24px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
           <h2 style={{ fontSize: 18, fontWeight: 600, color: C.textDk, margin: 0 }}>{title}</h2>
           <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: C.textLt, padding: 4, display: "flex", borderRadius: 4 }}>
@@ -124,19 +148,26 @@ export function CreateRequestModal({
 
         <div style={{ height: 1, background: C.warm, flexShrink: 0 }} />
 
-        {/* Form body */}
+        {/* ── Form body ── */}
         <div style={{ padding: "20px 24px", overflowY: "auto", display: "flex", flexDirection: "column", gap: 16, flex: 1 }}>
+
+          {/* Сумма */}
           <div>
-            <FieldLabel>Сумма (в рублях)</FieldLabel>
+            {/* STUB: перед отправкой на реальный API конвертировать rubToKopecks(amount)
+                  Пользователь вводит сумму в валюте счёта, API принимает в минимальных единицах */}
+            <FieldLabel>Сумма ({getAccountCurrency(account) || "RUB"})</FieldLabel>
             <div style={{ position: "relative" }}>
               <input type="text" placeholder="0" value={amount} onChange={e => setAmount(e.target.value)}
                 onFocus={() => setFocusedField("amount")} onBlur={() => setFocusedField(null)}
                 style={{ ...baseInput, ...focusStyle("amount"), paddingRight: 36 }} />
-              <span style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", fontSize: 14, color: C.textLt, pointerEvents: "none" }}>₽</span>
+              <span style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", fontSize: 14, color: C.textLt, pointerEvents: "none" }}>
+                {getCurrencySymbol(getAccountCurrency(account) || "RUB")}
+              </span>
             </div>
             {errors.amount && <span style={{ fontSize: 11, color: "var(--tm-danger)", marginTop: 4, display: "block" }}>{errors.amount}</span>}
           </div>
 
+          {/* Дата платежа */}
           <div>
             <FieldLabel>Дата платежа</FieldLabel>
             <div style={{ position: "relative" }}>
@@ -150,21 +181,16 @@ export function CreateRequestModal({
             {errors.date && <span style={{ fontSize: 11, color: "var(--tm-danger)", marginTop: 4, display: "block" }}>{errors.date}</span>}
           </div>
 
+          {/* Счёт */}
           <div>
             <FieldLabel>Счёт</FieldLabel>
-            <SelectField
-              value={account}
-              onChange={setAccount}
-              placeholder="Выберите счёт"
-              options={accountOptions}
-              focusStyle={focusStyle("account")}
-              baseInput={baseInput}
-              onFocus={() => setFocusedField("account")}
-              onBlur={() => setFocusedField(null)}
-            />
+            <SelectField value={account} onChange={setAccount} placeholder="Выберите счёт" options={ACCOUNTS}
+              focusStyle={focusStyle("account")} baseInput={baseInput}
+              onFocus={() => setFocusedField("account")} onBlur={() => setFocusedField(null)} />
             {errors.account && <span style={{ fontSize: 11, color: "var(--tm-danger)", marginTop: 4, display: "block" }}>{errors.account}</span>}
           </div>
 
+          {/* Контрагент */}
           <div style={{ position: "relative" }}>
             <FieldLabel>Контрагент</FieldLabel>
             <div style={{ position: "relative" }}>
@@ -192,20 +218,15 @@ export function CreateRequestModal({
             )}
           </div>
 
+          {/* Статья расходов */}
           <div>
             <FieldLabel>Статья расходов</FieldLabel>
-            <SelectField
-              value={article}
-              onChange={setArticle}
-              placeholder="Выберите статью"
-              options={articleOptions}
-              focusStyle={focusStyle("article")}
-              baseInput={baseInput}
-              onFocus={() => setFocusedField("article")}
-              onBlur={() => setFocusedField(null)}
-            />
+            <SelectField value={article} onChange={setArticle} placeholder="Выберите статью" options={ARTICLES}
+              focusStyle={focusStyle("article")} baseInput={baseInput}
+              onFocus={() => setFocusedField("article")} onBlur={() => setFocusedField(null)} />
           </div>
 
+          {/* Назначение платежа */}
           <div>
             <FieldLabel>Назначение платежа</FieldLabel>
             <textarea placeholder="Укажите назначение платежа" value={purpose}
@@ -215,6 +236,7 @@ export function CreateRequestModal({
               style={{ ...baseInput, ...focusStyle("purpose"), resize: "vertical", minHeight: 80 }} />
           </div>
 
+          {/* Приоритет */}
           <div>
             <FieldLabel>Приоритет</FieldLabel>
             <div style={{ display: "flex", gap: 8 }}>
@@ -231,6 +253,41 @@ export function CreateRequestModal({
             </div>
           </div>
 
+          {/* Маршрут согласования */}
+          {!isEdit && routes.length > 0 && (
+            <div>
+              <FieldLabel>
+                <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                  <GitBranch size={12} color={C.sage} />
+                  Маршрут согласования
+                </span>
+              </FieldLabel>
+              <div style={{ display: "flex", gap: 8 }}>
+                {routes.map(r => {
+                  const sel = selectedRoute === r.id;
+                  return (
+                    <button key={r.id} onClick={() => setSelectedRoute(r.id)}
+                      style={{
+                        flex: 1, padding: "9px 8px", borderRadius: 6,
+                        border: sel ? `2px solid ${C.sage}` : `1px solid ${C.warm}`,
+                        background: sel ? C.sage10 : C.surface,
+                        color: sel ? "#3D6B3D" : C.textLt,
+                        fontSize: 12, fontWeight: sel ? 600 : 400,
+                        cursor: "pointer", fontFamily: "Inter, sans-serif",
+                        transition: "all 0.15s", textAlign: "left",
+                        display: "flex", flexDirection: "column", gap: 2,
+                      }}
+                    >
+                      <span style={{ fontWeight: 600 }}>{r.name}</span>
+                      <span style={{ fontSize: 11, opacity: 0.85 }}>{r.description}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Повторяющийся платёж */}
           <div>
             <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
               <Toggle checked={recurring} onChange={() => setRecurring(v => !v)} />
@@ -273,12 +330,14 @@ export function CreateRequestModal({
           </div>
         </div>
 
+        {/* ── Footer ── */}
         <div style={{ borderTop: `1px solid ${C.warm}`, padding: "16px 24px", display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
           <button
             onClick={() => {
               if (!validate()) return;
-              const d: ModalRequestData = { id: initialData?.id, amount, date, account, counterparty, article, purpose, priority };
-              if (onSave) { onSave(d, false); } else { showToast(isEdit ? "Изменения сохранены" : "Заявка отправлена на согласование", "success"); onClose(); }
+              // amount — строка в рублях. При вызове реального API: rubToKopecks(amount)
+              const d: ModalRequestData = { id: initialData?.id, amount, date, account, counterparty, article, purpose, priority, recurring, frequency: recurring ? frequency : undefined, endDate: recurring ? endDate : undefined, routeId: !isEdit ? selectedRoute : undefined };
+              if (onSave) { onSave(d, false); } else { showToast(isEdit ? "Изменения сохранены" : (recurring ? "Заявка создана (повторяющийся платёж)" : "Заявка отправлена на согласование"), "success"); onClose(); }
             }}
             style={{ padding: "9px 20px", borderRadius: 6, background: C.sage, color: C.surface, border: "none", fontSize: 14, fontWeight: 500, cursor: "pointer", fontFamily: "Inter, sans-serif" }}>
             {submitLabel}
@@ -287,7 +346,7 @@ export function CreateRequestModal({
             <button
               onClick={() => {
                 if (!validate()) return;
-                const d: ModalRequestData = { id: initialData?.id, amount, date, account, counterparty, article, purpose, priority };
+                const d: ModalRequestData = { id: initialData?.id, amount, date, account, counterparty, article, purpose, priority, recurring, frequency: recurring ? frequency : undefined, endDate: recurring ? endDate : undefined, routeId: !isEdit ? selectedRoute : undefined };
                 if (onSave) { onSave(d, true); } else { showToast("Черновик сохранён", "warning"); onClose(); }
               }}
               style={{ padding: "9px 16px", borderRadius: 6, background: "transparent", color: C.olive, border: `1.5px solid ${C.olive}`, fontSize: 14, fontWeight: 500, cursor: "pointer", fontFamily: "Inter, sans-serif" }}>
@@ -306,14 +365,14 @@ export function CreateRequestModal({
 
 /* ── Sub-components ───────────────────────────────── */
 
-function FieldLabel({ children }: { children: React.ReactNode }) {
+function FieldLabel({ children }: { children: ReactNode }) {
   return <label style={{ fontSize: 12, fontWeight: 500, color: C.textLt, display: "block", marginBottom: 6 }}>{children}</label>;
 }
 
 function SelectField({ value, onChange, placeholder, options, focusStyle, baseInput, onFocus, onBlur }: {
   value: string; onChange: (v: string) => void; placeholder: string;
   options: { value: string; label: string }[];
-  focusStyle: React.CSSProperties; baseInput: React.CSSProperties;
+  focusStyle: CSSProperties; baseInput: CSSProperties;
   onFocus: () => void; onBlur: () => void;
 }) {
   return (

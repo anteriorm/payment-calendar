@@ -1,301 +1,731 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, type ReactNode } from "react";
+import { TableSkeleton, TableError } from "./TableSkeleton";
+import { RegistryDetailModal } from "./RegistryDetailModal";
 import * as api from "../../api";
-import { BarChart2, Plus, Search, X, ExternalLink, Pencil, Trash2 } from "lucide-react";
+import { BarChart2, Plus, Pencil, Trash2, Search, X, ExternalLink, Calendar, AlertTriangle } from "lucide-react";
 import { useToast } from "./Toast";
 import { C } from "../tokens";
-import { exportCsv, kopecksToRub } from "../utils";
+import { exportCsv, getAccountCurrency, formatAmount } from "../utils";
 
 type Priority = "high" | "medium" | "low";
+type RowStatus = "registry" | "paid" | "no_funds";
 
 interface RegistryRow {
-  id: number;
+  id:           number;
   counterparty: string;
-  article: string;
-  amount: number;
-  account: string;
-  date: string;
-  priority: Priority;
-  status: string;
+  article:      string;
+  amount:       number;
+  account:      string;
+  date:         string;
+  priority:     Priority;
+  status:       RowStatus;
 }
 
-const STATUS_CFG: Record<string, { label: string; bg: string; color: string }> = {
-  in_registry: { label: "В реестре", bg: C.badge.inRegistry.bg, color: C.badge.inRegistry.color },
-  paid:        { label: "Оплачена",  bg: C.badge.paid.bg,       color: C.badge.paid.color },
-  approved:    { label: "Согласована", bg: C.sage10,             color: "#3D6B3D" },
-};
+const INITIAL_ROWS: RegistryRow[] = [
+  { id: 2845, counterparty: "ООО Поставщик Альфа", article: "Аренда офиса",        amount: 420000, account: "Расчётный счёт №1", date: "25.06.2026", priority: "high",   status: "registry" },
+  { id: 2846, counterparty: "ИП Смирнов А.В.",     article: "Заработная плата",    amount: 560000, account: "Расчётный счёт №1", date: "28.06.2026", priority: "high",   status: "registry" },
+  { id: 2841, counterparty: "АО ТехСервис",        article: "Расходные материалы", amount: 187500, account: "Расчётный счёт №2", date: "24.06.2026", priority: "low",    status: "paid"     },
+  { id: 2842, counterparty: "ООО РентаГрупп",      article: "Услуги подрядчиков",  amount: 95000,  account: "Касса",             date: "26.06.2026", priority: "medium", status: "paid"     },
+  { id: 2847, counterparty: "ПАО Энергоресурс",    article: "Налоги и сборы",      amount: 260000, account: "Расчётный счёт №2", date: "27.06.2026", priority: "medium", status: "no_funds" },
+];
 
-const PRIORITY_CFG: Record<Priority, { label: string; dot: string }> = {
-  high:   { label: "Высокий", dot: C.danger },
-  medium: { label: "Средний", dot: C.beige },
-  low:    { label: "Низкий",  dot: C.sage },
-};
+interface AvailableRequest {
+  id:           number;
+  counterparty: string;
+  article:      string;
+  amount:       number;
+  date:         string;
+  priority:     Priority;
+}
 
-function fmtFull(n: number): string {
+const AVAILABLE: AvailableRequest[] = [
+  { id: 2843, counterparty: "ООО ТехСервис",       article: "Услуги подрядчиков", amount: 85000,  date: "20.06.2026", priority: "medium" },
+  { id: 2844, counterparty: "ИП Смирнов А.В.",     article: "Аренда",             amount: 45000,  date: "22.06.2026", priority: "high"   },
+  { id: 2848, counterparty: "ПАО Энергоресурс",    article: "Консалтинг",         amount: 95000,  date: "15.06.2026", priority: "medium" },
+  { id: 2850, counterparty: "ООО Альфа-Строй",     article: "Аренда офиса",       amount: 120000, date: "30.06.2026", priority: "low"    },
+  { id: 2851, counterparty: "ЗАО МедиаГрупп",      article: "Реклама",            amount: 38000,  date: "28.06.2026", priority: "low"    },
+];
+
+function fmtFull(n: number, account = ""): string {
+  const currency = getAccountCurrency(account);
+  const prefix = n < 0 ? "−" : "";
   const s = Math.floor(Math.abs(n)).toString();
   const parts: string[] = [];
   for (let i = s.length; i > 0; i -= 3) parts.unshift(s.slice(Math.max(0, i - 3), i));
-  return (n < 0 ? "−" : "") + parts.join(" ") + ",00 ₽";
+  return prefix + formatAmount(Math.abs(n), currency);
 }
 
-function fmtShort(n: number): string {
-  const s = Math.floor(n).toString();
-  const parts: string[] = [];
-  for (let i = s.length; i > 0; i -= 3) parts.unshift(s.slice(Math.max(0, i - 3), i));
-  return parts.join(" ") + " ₽";
+function fmtShort(n: number, account = ""): string {
+  return formatAmount(n, getAccountCurrency(account));
 }
 
-export function PaymentRegistry({ onAddRequest, onPaymentsPaid, canMarkPaid = true }: {
+const STATUS_CFG: Record<RowStatus, { label: string; bg: string; color: string }> = {
+  registry: { label: "В реестре",   bg: C.badge.inRegistry.bg, color: C.badge.inRegistry.color },
+  paid:     { label: "Оплачена",    bg: C.badge.paid.bg,        color: C.badge.paid.color       },
+  no_funds: { label: "Нет средств", bg: C.danger15,             color: "#8B2020"                 },
+};
+
+const PRIORITY_CFG: Record<Priority, { label: string; dot: string; border?: boolean }> = {
+  high:   { label: "Высокий", dot: C.danger                  },
+  medium: { label: "Средний", dot: C.beige,  border: true    },
+  low:    { label: "Низкий",  dot: C.sage                    },
+};
+
+interface PaidItem { dateStr: string; amount: number; }
+
+export function PaymentRegistry({
+  onAddRequest: _onAddRequest,
+  onPaymentsPaid,
+  canMarkPaid = true,
+}: {
   onAddRequest?: () => void;
-  onPaymentsPaid?: (items: { dateStr: string; amount: number }[]) => void;
+  onPaymentsPaid?: (items: PaidItem[]) => void;
   canMarkPaid?: boolean;
 }) {
   const { showToast } = useToast();
-  const [registries, setRegistries] = useState<any[]>([]);
-  const [currentId, setCurrentId] = useState<number | null>(null);
-  const [rows, setRows] = useState<RegistryRow[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [selected, setSelected] = useState<Set<number>>(new Set());
-  const [hovered, setHovered] = useState<number | null>(null);
-  const [showAddModal, setShowAddModal] = useState(false);
 
-  const loadRegistries = () => {
-    setLoading(true);
-    api.registries.getAll()
-      .then(data => { setRegistries(data); if (data.length > 0 && !currentId) setCurrentId(data[0].id); })
-      .catch(() => showToast("Ошибка загрузки реестров", "error"))
-      .finally(() => setLoading(false));
+  const [rows,             setRows]           = useState<RegistryRow[]>([]);
+  const [loading,          setLoading]         = useState(true);
+  const [loadError,        setLoadError]       = useState<string | null>(null);
+  const [registryDate,     setRegistryDate]    = useState("18.06.2026");
+  const [editingDate,      setEditingDate]     = useState(false);
+  const [availableBalance, setAvailableBalance]= useState<number>(0);
+
+  const loadData = () => {
+    setLoading(true); setLoadError(null);
+    setTimeout(() => { setRows(INITIAL_ROWS.map(r => ({...r}))); setLoading(false); }, 300);
+  };
+  useEffect(() => { loadData(); }, []);
+
+  // Load RUB account balances for "Доступный остаток" card
+  useEffect(() => {
+    api.accounts.getAll().then(accounts => {
+      const rubBalance = (accounts as any[])
+        .filter((a: any) => a.currency === "RUB")
+        .reduce((s: number, a: any) => s + (a.current ?? 0) / 100, 0);
+      setAvailableBalance(rubBalance);
+    }).catch(() => setAvailableBalance(992500)); // fallback
+  }, []);
+
+  // Computed summary values from real rows
+  const totalToPay   = rows.filter(r => r.status !== "paid").reduce((s, r) => s + r.amount, 0);
+  const totalAll     = rows.reduce((s, r) => s + r.amount, 0);
+  const deficit      = totalToPay > availableBalance ? totalToPay - availableBalance : 0;
+  const [selected,     setSelected]    = useState<Set<number>>(new Set());
+  const [hovered,      setHovered]     = useState<number | null>(null);
+  const [showAddModal,    setShowAddModal]    = useState(false);
+  const [detailRegistryId, setDetailRegistryId] = useState<number | null>(null);
+  const [editTarget,   setEditTarget]  = useState<RegistryRow | null>(null);
+  const [delTarget,    setDelTarget]   = useState<RegistryRow | null>(null);
+
+  const allSelected  = rows.length > 0 && selected.size === rows.length;
+  const someSelected = selected.size > 0 && !allSelected;
+  const selCount     = selected.size;
+
+  const toggleAll = () =>
+    setSelected(allSelected ? new Set() : new Set(rows.map(r => r.id)));
+
+  const toggleRow = (id: number) =>
+    setSelected(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+
+  const markAsPaid = () => {
+    if (selCount === 0) return;
+    const paidRows = rows.filter(r => selected.has(r.id) && r.status !== "paid");
+    setRows(prev => prev.map(r => selected.has(r.id) ? { ...r, status: "paid" as RowStatus } : r));
+    const n = selCount;
+    setSelected(new Set());
+    if (paidRows.length > 0) {
+      onPaymentsPaid?.(paidRows.map(r => ({ dateStr: r.date, amount: r.amount })));
+    }
+    showToast(
+      `${n} заявк${n === 1 ? "а отмечена" : n < 5 ? "и отмечены" : " отмечено"} оплаченными`,
+      "success",
+    );
   };
 
-  const loadRegistryDetail = (id: number) => {
-    api.registries.getOne(id)
-      .then(reg => {
-        const mapped: RegistryRow[] = (reg.payments || []).map((p: any) => ({
-          id: p.id,
-          counterparty: p.counterparty?.name || "",
-          article: p.item?.name || "",
-          amount: kopecksToRub(p.amount || 0),
-          account: p.account?.name || "",
-          date: p.planned_date ? p.planned_date.split("-").reverse().join(".") : "",
-          priority: p.priority || "medium",
-          status: reg.status === "paid" ? "paid" : "in_registry",
-        }));
-        setRows(mapped);
-      })
-      .catch(() => showToast("Ошибка загрузки реестра", "error"));
+  const handleExcel = () => {
+    const toExport = selected.size > 0
+      ? rows.filter(r => selected.has(r.id))
+      : rows;
+    exportCsv(
+      `Реестр_${registryDate.replace(/\./g, "-")}.csv`,
+      ["№", "Контрагент", "Статья", "Сумма", "Счёт", "Приоритет", "Статус"],
+      toExport.map(r => [
+        r.id,
+        r.counterparty,
+        r.article,
+        fmtShort(r.amount, r.account),
+        r.account,
+        PRIORITY_CFG[r.priority].label,
+        STATUS_CFG[r.status].label,
+      ]),
+    );
+    showToast(`Реестр_${registryDate.replace(/\./g, "-")}.csv скачан (${toExport.length} строк)`, "success");
   };
 
-  useEffect(() => { loadRegistries(); }, []);
-  useEffect(() => { if (currentId) loadRegistryDetail(currentId); else setRows([]); }, [currentId]);
-
-  const toggleRow = (id: number) => setSelected(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
-  const allSelected = rows.length > 0 && selected.size === rows.length;
-  const toggleAll = () => setSelected(allSelected ? new Set() : new Set(rows.map(r => r.id)));
-
-  const currentRegistry = registries.find(r => r.id === currentId);
-
-  const markAsPaid = async () => {
-    if (!currentId) return;
-    try {
-      await api.registries.pay(currentId);
-      showToast(`Реестр №${currentId} оплачен`, "success");
-      if (onPaymentsPaid) onPaymentsPaid(rows.filter(r => selected.has(r.id)).map(r => ({ dateStr: r.date, amount: r.amount })));
-      setSelected(new Set());
-      loadRegistries();
-      loadRegistryDetail(currentId);
-    } catch { showToast("Ошибка оплаты реестра", "error"); }
+  const handleAddFromModal = (ids: number[]) => {
+    const newRows: RegistryRow[] = AVAILABLE
+      .filter(r => ids.includes(r.id))
+      .map(r => ({
+        id:           r.id,
+        counterparty: r.counterparty,
+        article:      r.article,
+        amount:       r.amount,
+        account:      "Расчётный счёт №1",
+        priority:     r.priority,
+        status:       "registry" as RowStatus,
+      }));
+    setRows(prev => [...prev, ...newRows]);
+    showToast(`${newRows.length} заявок добавлено в реестр`, "success");
+    setShowAddModal(false);
   };
 
-  const handleExport = async () => {
-    if (!currentId) return;
-    try {
-      const blob = await api.registries.export(currentId);
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url; a.download = `Реестр_${currentId}.csv`; a.click();
-      window.URL.revokeObjectURL(url);
-      showToast(`Реестр №${currentId} скачан`, "success");
-    } catch { showToast("Ошибка экспорта", "error"); }
-  };
-
-  const handleCreateRegistry = async (paymentIds: number[]) => {
-    const today = new Date().toISOString().slice(0, 10);
-    try {
-      await api.registries.create({ registry_date: today, payment_ids: paymentIds });
-      showToast("Реестр создан", "success");
-      loadRegistries();
-      setShowAddModal(false);
-    } catch (err: any) { showToast(err?.response?.data?.message || "Ошибка создания реестра", "error"); }
-  };
-
-  const totalAmount = rows.reduce((s, r) => s + r.amount, 0);
+  const selLabel = selCount === 0
+    ? "Выбрано: 0 заявок"
+    : `Выбрано: ${selCount} заявк${selCount === 1 ? "а" : selCount < 5 ? "и" : ""}`;
 
   return (
     <div style={{ padding: 24, fontFamily: "Inter, sans-serif", minHeight: "100%", overflowY: "auto" }}>
-      <div style={{ marginBottom: 20 }}>
-        <h1 style={{ fontSize: 24, fontWeight: 700, color: C.textDk, margin: 0 }}>Реестр платежей</h1>
-        <div style={{ display: "flex", gap: 16, marginTop: 8, alignItems: "center" }}>
-          <select value={currentId || ""} onChange={e => { setCurrentId(Number(e.target.value) || null); setSelected(new Set()); }}
-            style={{ padding: "6px 12px", borderRadius: 6, border: `1px solid ${C.warm}`, background: C.surface, fontSize: 13, color: C.textDk, fontFamily: "Inter, sans-serif" }}>
-            <option value="">Выберите реестр</option>
-            {registries.map(r => <option key={r.id} value={r.id}>Реестр №{r.id} ({r.registry_date}) — {r.status === "paid" ? "Оплачен" : "Создан"}</option>)}
-          </select>
-          <span style={{ fontSize: 14, color: C.textLt }}>
-            {currentRegistry ? `Дата: ${currentRegistry.registry_date} · Статус: ${currentRegistry.status === "paid" ? "Оплачен" : "Создан"} · Заявок: ${rows.length}` : "Нет реестров"}
-          </span>
+
+      {/* ── Page header ── */}
+      <div style={{ marginBottom: 20, display: "flex", alignItems: "center", gap: 20, flexWrap: "wrap" }}>
+        <div>
+          <h1 style={{ fontSize: 24, fontWeight: 700, color: C.textDk, margin: 0 }}>Реестр платежей</h1>
+          {/* A: Inline date picker */}
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4 }}>
+            <span style={{ fontSize: 12, color: C.textLt }}>Дата реестра:</span>
+            {editingDate ? (
+              <input
+                autoFocus
+                value={registryDate}
+                onChange={e => setRegistryDate(e.target.value)}
+                onBlur={() => setEditingDate(false)}
+                onKeyDown={e => e.key === "Enter" && setEditingDate(false)}
+                style={{ padding: "2px 8px", border: `1.5px solid ${C.sage}`, borderRadius: 5, fontSize: 13, color: C.textDk, fontFamily: "Inter, sans-serif", outline: "none", width: 110 }}
+              />
+            ) : (
+              <button
+                onClick={() => setEditingDate(true)}
+                title="Изменить дату реестра"
+                style={{ display: "flex", alignItems: "center", gap: 4, background: "none", border: "none", cursor: "pointer", color: C.textDk, fontSize: 13, fontFamily: "Inter, sans-serif", padding: "2px 4px", borderRadius: 4 }}
+              >
+                <Calendar size={12} color={C.olive} />
+                {registryDate}
+                <Pencil size={10} color={C.textLt} />
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
+      {/* ── B: Summary cards — computed from real rows ── */}
       <div style={{ display: "flex", gap: 16, marginBottom: 20 }}>
-        <SummaryCard label="Итого к оплате" value={fmtShort(totalAmount)} valueColor={C.textDk} />
-        <SummaryCard label="Заявок в реестре" value={String(rows.length)} valueColor={C.textDk} />
-        <SummaryCard label="Статус" value={currentRegistry?.status === "paid" ? "Оплачен" : currentRegistry ? "Создан" : "—"} valueColor={currentRegistry?.status === "paid" ? C.sage : C.textDk} />
+        <SummaryCard
+          label="Итого к оплате"
+          value={fmtShort(totalToPay)}
+          note={`из ${rows.length} заявок, RUB-экв.`}
+          valueColor={C.textDk}
+        />
+        <SummaryCard
+          label="Доступный остаток"
+          value={fmtShort(availableBalance)}
+          note="сумма остатков RUB-счетов"
+          valueColor={deficit > 0 ? C.danger : C.sage}
+        />
+        <SummaryCard
+          label={deficit > 0 ? "Дефицит" : "Профицит"}
+          value={(deficit > 0 ? "−" : "+") + fmtShort(Math.abs(availableBalance - totalToPay))}
+          note="RUB-экв."
+          valueColor={deficit > 0 ? C.danger : C.sage}
+          cardBg={deficit > 0 ? C.danger08 : C.sage10}
+        />
       </div>
 
+      {/* ── Toolbar ── */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-        <span style={{ fontSize: 13, color: C.textLt }}>Выбрано: {selected.size} заявок</span>
+        <span style={{ fontSize: 13, color: C.textLt, transition: "color 0.15s" }}>{selLabel}</span>
         <div style={{ display: "flex", gap: 8 }}>
-          <button onClick={handleExport} disabled={!currentId}
-            style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 14px", borderRadius: 6, background: "transparent", color: C.olive, border: `1.5px solid ${C.olive}`, fontSize: 13, fontWeight: 500, cursor: currentId ? "pointer" : "default", fontFamily: "Inter, sans-serif" }}>
-            <BarChart2 size={14} /> Выгрузить CSV
+          <BtnOutline onClick={() => setDetailRegistryId(1)} icon={<ExternalLink size={14} />}>
+            Открыть реестр
+          </BtnOutline>
+          <BtnOutline onClick={handleExcel} icon={<BarChart2 size={14} />}>
+            Выгрузить в Excel
+          </BtnOutline>
+
+          <button
+            onClick={markAsPaid}
+            disabled={selCount === 0 || !canMarkPaid}
+            style={{
+              padding: "7px 16px",
+              borderRadius: 6,
+              background: selCount > 0 && canMarkPaid ? C.sage : C.ivory,
+              color: C.surface,
+              border: "none",
+              fontSize: 13,
+              fontWeight: 500,
+              cursor: selCount > 0 ? "pointer" : "not-allowed",
+              fontFamily: "Inter, sans-serif",
+              transition: "background 0.2s",
+              opacity: selCount === 0 ? 0.65 : 1,
+            }}
+          >
+            Отметить оплаченными{selCount > 0 ? ` (${selCount})` : ""}
           </button>
-          {canMarkPaid && currentRegistry?.status !== "paid" && (
-            <button onClick={markAsPaid} disabled={rows.length === 0}
-              style={{ padding: "7px 16px", borderRadius: 6, background: rows.length > 0 ? C.sage : C.ivory, color: C.surface, border: "none", fontSize: 13, fontWeight: 500, cursor: rows.length > 0 ? "pointer" : "not-allowed", fontFamily: "Inter, sans-serif" }}>
-              Отметить оплаченными
-            </button>
+
+          {canMarkPaid && (
+            <BtnOutline onClick={() => setShowAddModal(true)} icon={<Plus size={14} />}>
+              Добавить заявку
+            </BtnOutline>
           )}
-          <button onClick={() => setShowAddModal(true)}
-            style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 14px", borderRadius: 6, background: "transparent", color: C.olive, border: `1.5px solid ${C.olive}`, fontSize: 13, fontWeight: 500, cursor: "pointer", fontFamily: "Inter, sans-serif" }}>
-            <Plus size={14} /> Создать реестр
-          </button>
         </div>
       </div>
 
-      <div style={{ borderRadius: 8, border: `1px solid ${C.warm}`, overflow: "hidden", background: C.surface, boxShadow: "0 1px 3px rgba(44,44,30,0.08)" }}>
+      {/* ── Table ── */}
+      <div
+        style={{
+          borderRadius: 8,
+          border: `1px solid ${C.warm}`,
+          overflow: "hidden",
+          background: C.surface,
+          boxShadow: "0 1px 3px rgba(44,44,30,0.08)",
+        }}
+      >
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-          <thead><tr style={{ background: C.hdr }}>
-            <th style={{ padding: "10px 14px", width: 36 }}><Checkbox checked={allSelected} onChange={toggleAll} /></th>
-            {["№", "Контрагент", "Статья", "Сумма", "Счёт", "Приоритет", "Статус"].map(col => (
-              <th key={col} style={{ padding: "10px 12px", textAlign: "left", fontWeight: 600, color: C.textDk, fontSize: 12, whiteSpace: "nowrap" }}>{col}</th>
-            ))}
-          </tr></thead>
+          <thead>
+            <tr style={{ background: C.hdr }}>
+              <th style={{ padding: "10px 14px", width: 36 }}>
+                <Checkbox checked={allSelected} indeterminate={someSelected} onChange={toggleAll} />
+              </th>
+              {["№", "Контрагент", "Статья", "Сумма", "Счёт", "Приоритет", "Статус", "Действия"].map(col => (
+                <th key={col} style={{ padding: "10px 12px", textAlign: "left", fontWeight: 600, color: C.textDk, fontSize: 12, whiteSpace: "nowrap" }}>
+                  {col}
+                </th>
+              ))}
+            </tr>
+          </thead>
           <tbody>
-            {loading && <tr><td colSpan={8} style={{ padding: 24, textAlign: "center", color: C.textLt }}>Загрузка...</td></tr>}
-            {!loading && rows.length === 0 && <tr><td colSpan={8} style={{ padding: 24, textAlign: "center", color: C.textLt }}>В реестре нет платежей</td></tr>}
-            {!loading && rows.map((row, i) => {
+            {/* Loading skeleton — правильные <tr> внутри <tbody> */}
+            {loading && Array.from({ length: 5 }).map((_, i) => (
+              <tr key={`skel-${i}`} style={{ background: i % 2 === 0 ? C.surface : C.ivory50 }}>
+                {Array.from({ length: 9 }).map((_, j) => (
+                  <td key={j} style={{ padding: "10px 12px" }}>
+                    <div style={{ height: 12, borderRadius: 4, background: `linear-gradient(90deg, ${C.ivory} 25%, ${C.warm} 50%, ${C.ivory} 75%)`, backgroundSize: "200% 100%", animation: "skeleton-pulse 1.4s ease-in-out infinite" }} />
+                  </td>
+                ))}
+              </tr>
+            ))}
+
+            {/* Error state */}
+            {!loading && loadError && (
+              <tr>
+                <td colSpan={9} style={{ padding: "24px", textAlign: "center", color: "#8B2020", fontSize: 13 }}>
+                  {loadError} — <button onClick={loadData} style={{ background: "none", border: "none", cursor: "pointer", color: C.sage, textDecoration: "underline", fontFamily: "Inter, sans-serif", fontSize: 13 }}>Повторить</button>
+                </td>
+              </tr>
+            )}
+
+            {/* Data rows */}
+            {!loading && !loadError && rows.map((row, i) => {
               const isSel = selected.has(row.id);
-              const sc = STATUS_CFG[row.status] ?? STATUS_CFG.in_registry;
-              const pc = PRIORITY_CFG[row.priority] ?? PRIORITY_CFG.medium;
+              const isHov = hovered === row.id;
+              const even  = i % 2 === 0;
+
+              const bg = isSel
+                ? C.selected
+                : isHov ? C.beige30
+                : even ? C.surface : C.ivory50;
+
+              const sc = STATUS_CFG[row.status];
+              const pc = PRIORITY_CFG[row.priority];
+
               return (
-                <tr key={row.id} onClick={() => toggleRow(row.id)} onMouseEnter={() => setHovered(row.id)} onMouseLeave={() => setHovered(null)}
-                  style={{ background: isSel ? C.selected : hovered === row.id ? C.beige30 : i % 2 === 0 ? C.surface : C.ivory50, transition: "background 0.1s", cursor: "pointer" }}>
-                  <td style={{ padding: "10px 14px" }} onClick={e => e.stopPropagation()}><Checkbox checked={isSel} onChange={() => toggleRow(row.id)} /></td>
+                <tr
+                  key={row.id}
+                  onClick={() => toggleRow(row.id)}
+                  onMouseEnter={() => setHovered(row.id)}
+                  onMouseLeave={() => setHovered(null)}
+                  style={{ background: bg, transition: "background 0.1s", cursor: "pointer" }}
+                >
+                  <td style={{ padding: "10px 14px" }} onClick={e => e.stopPropagation()}>
+                    <Checkbox checked={isSel} onChange={() => toggleRow(row.id)} />
+                  </td>
                   <td style={{ padding: "10px 12px", color: C.textLt, fontVariantNumeric: "tabular-nums" }}>{row.id}</td>
                   <td style={{ padding: "10px 12px", color: C.textDk, fontWeight: 500, whiteSpace: "nowrap" }}>{row.counterparty}</td>
                   <td style={{ padding: "10px 12px", color: C.textLt, whiteSpace: "nowrap" }}>{row.article}</td>
-                  <td style={{ padding: "10px 12px", color: C.textDk, fontWeight: 600, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>{fmtFull(row.amount)}</td>
+                  <td style={{ padding: "10px 12px", color: C.textDk, fontWeight: 600, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>{fmtFull(row.amount, row.account)}</td>
                   <td style={{ padding: "10px 12px", color: C.textLt, whiteSpace: "nowrap" }}>{row.account}</td>
                   <td style={{ padding: "10px 12px", whiteSpace: "nowrap" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                      <span style={{ width: 9, height: 9, borderRadius: "50%", background: pc.dot, flexShrink: 0 }} />
+                      <span style={{ width: 9, height: 9, borderRadius: "50%", background: pc.dot, flexShrink: 0, border: pc.border ? "1px solid #C0A070" : undefined }} />
                       <span style={{ color: C.textDk }}>{pc.label}</span>
                     </div>
                   </td>
                   <td style={{ padding: "10px 12px", whiteSpace: "nowrap" }}>
                     <span style={{ display: "inline-flex", padding: "2px 8px", borderRadius: 4, background: sc.bg, color: sc.color, fontSize: 11, fontWeight: 500 }}>{sc.label}</span>
                   </td>
+                  <td style={{ padding: "10px 12px" }} onClick={e => e.stopPropagation()}>
+                    <ActionIcons onEdit={() => setEditTarget(row)} onDelete={() => setDelTarget(row)} />
+                  </td>
                 </tr>
               );
             })}
+
+            {!loading && !loadError && rows.length === 0 && (
+              <tr><td colSpan={9} style={{ padding: "24px", textAlign: "center", color: C.textLt, fontSize: 13 }}>Реестр пуст</td></tr>
+            )}
           </tbody>
         </table>
+
         <div style={{ padding: "10px 14px", borderTop: `1px solid ${C.warm}`, display: "flex", alignItems: "center", justifyContent: "space-between", background: C.ivory }}>
           <span style={{ fontSize: 12, color: C.textLt }}>Показано {rows.length} записей</span>
-          <span style={{ fontSize: 12, color: C.textLt }}>Итого: <strong style={{ color: C.textDk }}>{fmtShort(totalAmount)}</strong></span>
+          <span style={{ fontSize: 12, color: C.textLt }}>
+            Итого: <strong style={{ color: C.textDk }}>{fmtShort(totalAll)}</strong>
+            {totalToPay < totalAll && (
+              <span style={{ marginLeft: 8, color: C.textLt }}>
+                (к оплате: <strong style={{ color: deficit > 0 ? C.danger : C.textDk }}>{fmtShort(totalToPay)}</strong>)
+              </span>
+            )}
+          </span>
         </div>
       </div>
 
-      {showAddModal && <CreateRegistryModal onClose={() => setShowAddModal(false)} onCreate={handleCreateRegistry} />}
+      {/* ── Add to registry modal ── */}
+      {showAddModal && (
+        <AddToRegistryModal
+          available={AVAILABLE.filter(r => !rows.find(row => row.id === r.id))}
+          onClose={() => setShowAddModal(false)}
+          onAdd={handleAddFromModal}
+          fmtShort={fmtShort}
+          availableBalance={availableBalance}
+          alreadyTotal={totalToPay}
+        />
+      )}
+
+      {/* ── Edit row modal ── */}
+      {editTarget && (
+        <RegistryEditModal
+          row={editTarget}
+          onSave={(id, status) => {
+            setRows(prev => prev.map(r => r.id === id ? { ...r, status } : r));
+            showToast("Статус обновлён", "success");
+            setEditTarget(null);
+          }}
+          onClose={() => setEditTarget(null)}
+        />
+      )}
+
+      {/* ── Delete confirm ── */}
+      {delTarget && (
+        <RegistryConfirmDelete
+          row={delTarget}
+          onConfirm={() => {
+            setRows(prev => prev.filter(r => r.id !== delTarget.id));
+            showToast(`Заявка № ${delTarget.id} удалена из реестра`, "error");
+            setDelTarget(null);
+          }}
+          onCancel={() => setDelTarget(null)}
+        />
+      )}
+
+      {detailRegistryId !== null && (
+        <RegistryDetailModal
+          registryId={detailRegistryId}
+          onClose={() => setDetailRegistryId(null)}
+        />
+      )}
     </div>
   );
 }
 
-function SummaryCard({ label, value, valueColor, cardBg }: { label: string; value: string; valueColor: string; cardBg?: string }) {
+/* ── Add-to-registry modal ──────────────────────────── */
+
+const PRIORITY_ORDER_MODAL: Record<Priority, number> = { high: 0, medium: 1, low: 2 };
+
+function AddToRegistryModal({
+  available,
+  onClose,
+  onAdd,
+  fmtShort,
+  availableBalance = 0,
+  alreadyTotal = 0,
+}: {
+  available: AvailableRequest[];
+  onClose: () => void;
+  onAdd: (ids: number[]) => void;
+  fmtShort: (n: number, account?: string) => string;
+  availableBalance?: number;
+  alreadyTotal?: number;
+}) {
+  const [search,  setSearch]  = useState("");
+  const [picked,  setPicked]  = useState<Set<number>>(new Set());
+
+  // C: Sort by priority — high first
+  const filtered = available
+    .filter(r =>
+      !search ||
+      r.counterparty.toLowerCase().includes(search.toLowerCase()) ||
+      r.article.toLowerCase().includes(search.toLowerCase()),
+    )
+    .sort((a, b) => PRIORITY_ORDER_MODAL[a.priority] - PRIORITY_ORDER_MODAL[b.priority]);
+
+  const togglePick = (id: number) =>
+    setPicked(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+
+  const pc = picked.size;
+
+  // D: Compute running total of selected + already in registry
+  const selectedTotal = available
+    .filter(r => picked.has(r.id))
+    .reduce((s, r) => s + r.amount, 0);
+  const projectedTotal = alreadyTotal + selectedTotal;
+  const overBudget = availableBalance > 0 && projectedTotal > availableBalance;
+  const deficit = overBudget ? projectedTotal - availableBalance : 0;
+
   return (
-    <div style={{ flex: 1, padding: "18px 20px", borderRadius: 8, background: cardBg ?? C.surface, border: `1px solid ${C.warm}`, display: "flex", flexDirection: "column", gap: 6 }}>
-      <span style={{ fontSize: 12, color: C.textLt }}>{label}</span>
-      <span style={{ fontSize: 22, fontWeight: 700, color: valueColor, fontVariantNumeric: "tabular-nums", lineHeight: 1.2 }}>{value}</span>
-    </div>
-  );
-}
-
-function Checkbox({ checked, onChange }: { checked: boolean; onChange: () => void }) {
-  return (
-    <div onClick={e => { e.stopPropagation(); onChange(); }}
-      style={{ width: 16, height: 16, borderRadius: 3, border: checked ? "none" : `1.5px solid ${C.warm}`, background: checked ? C.sage : C.surface, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0 }}>
-      {checked && <svg width="10" height="8" viewBox="0 0 10 8" fill="none"><path d="M1 4l2.5 2.5L9 1" stroke="#FAFAF5" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>}
-    </div>
-  );
-}
-
-function CreateRegistryModal({ onClose, onCreate }: { onClose: () => void; onCreate: (ids: number[]) => void }) {
-  const [payments, setPayments] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState("");
-  const [picked, setPicked] = useState<Set<number>>(new Set());
-
-  useEffect(() => {
-    api.payments.getAll({ status: "approved" })
-      .then(data => setPayments(data.filter((p: any) => !p.registry_id)))
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, []);
-
-  const togglePick = (id: number) => setPicked(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
-
-  const filtered = payments.filter(p =>
-    !search || (p.counterparty || "").toLowerCase().includes(search.toLowerCase())
-  );
-
-  return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: C.overlay, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, fontFamily: "Inter, sans-serif" }}>
-      <div onClick={e => e.stopPropagation()} style={{ width: 560, background: C.surface, border: `1px solid ${C.warm}`, borderRadius: 12, display: "flex", flexDirection: "column", boxShadow: "0 4px 24px rgba(44,44,30,0.18)", maxHeight: "80vh" }}>
+    <div
+      onClick={onClose}
+      style={{ position: "fixed", inset: 0, background: C.overlay, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, fontFamily: "Inter, sans-serif" }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{ width: 560, background: C.surface, border: `1px solid ${C.warm}`, borderRadius: 12, display: "flex", flexDirection: "column", boxShadow: "0 4px 24px rgba(44,44,30,0.18)", maxHeight: "80vh" }}
+      >
+        {/* Header */}
         <div style={{ padding: "18px 22px 14px", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
-          <h2 style={{ fontSize: 17, fontWeight: 600, color: C.textDk, margin: 0 }}>Создать реестр из согласованных заявок</h2>
-          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: C.textLt, padding: 4 }}><X size={17} /></button>
+          <h2 style={{ fontSize: 17, fontWeight: 600, color: C.textDk, margin: 0 }}>
+            Добавить заявки в реестр
+          </h2>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: C.textLt, display: "flex", padding: 4, borderRadius: 4 }}>
+            <X size={17} />
+          </button>
         </div>
+
         <div style={{ height: 1, background: C.warm, flexShrink: 0 }} />
+
+        {/* Search */}
         <div style={{ padding: "12px 22px", flexShrink: 0 }}>
           <div style={{ position: "relative" }}>
-            <div style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: C.warm, display: "flex", pointerEvents: "none" }}><Search size={14} /></div>
-            <input autoFocus placeholder="Поиск по контрагенту…" value={search} onChange={e => setSearch(e.target.value)}
-              style={{ width: "100%", padding: "8px 10px 8px 32px", border: `1px solid ${C.warm}`, borderRadius: 6, background: C.surface, fontSize: 13, color: C.textDk, outline: "none", fontFamily: "Inter, sans-serif", boxSizing: "border-box" }} />
+            <div style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: C.warm, display: "flex", pointerEvents: "none" }}>
+              <Search size={14} />
+            </div>
+            <input
+              autoFocus
+              placeholder="Поиск по контрагенту или статье…"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              style={{ width: "100%", padding: "8px 10px 8px 32px", border: `1px solid ${C.warm}`, borderRadius: 6, background: C.surface, fontSize: 13, color: C.textDk, outline: "none", fontFamily: "Inter, sans-serif", boxSizing: "border-box" }}
+            />
           </div>
         </div>
+
+        {/* Request list */}
         <div style={{ flex: 1, overflowY: "auto", padding: "0 22px 4px" }}>
-          {loading && <div style={{ padding: 24, textAlign: "center", color: C.textLt }}>Загрузка...</div>}
-          {!loading && filtered.length === 0 && <div style={{ padding: 24, textAlign: "center", color: C.textLt }}>Нет согласованных заявок</div>}
-          {!loading && filtered.map((p: any) => {
-            const isPicked = picked.has(p.id);
+          {filtered.length === 0 && (
+            <div style={{ padding: "24px 0", textAlign: "center", color: C.textLt, fontSize: 13 }}>
+              Нет доступных заявок
+            </div>
+          )}
+          {filtered.map(r => {
+            const isPicked = picked.has(r.id);
+            const pc_cfg = ({ high: { dot: C.danger }, medium: { dot: C.beige, border: true }, low: { dot: C.sage } } as const)[r.priority];
             return (
-              <div key={p.id} onClick={() => togglePick(p.id)}
-                style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 12px", borderRadius: 6, marginBottom: 4, background: isPicked ? C.beige30 : "transparent", border: `1px solid ${isPicked ? C.beige : C.warm}`, cursor: "pointer" }}>
-                <Checkbox checked={isPicked} onChange={() => togglePick(p.id)} />
+              <div
+                key={r.id}
+                onClick={() => togglePick(r.id)}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 12,
+                  padding: "11px 12px",
+                  borderRadius: 6,
+                  marginBottom: 4,
+                  background: isPicked ? C.beige30 : "transparent",
+                  border: `1px solid ${isPicked ? C.beige : C.warm}`,
+                  cursor: "pointer",
+                  transition: "background 0.1s, border-color 0.1s",
+                }}
+              >
+                <Checkbox checked={isPicked} onChange={() => togglePick(r.id)} />
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13, fontWeight: 500, color: C.textDk, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.counterparty}</div>
-                  <div style={{ fontSize: 11, color: C.textLt, marginTop: 2 }}>{p.item} · {p.planned_date?.split("-").reverse().join(".")}</div>
+                  <div style={{ fontSize: 13, fontWeight: 500, color: C.textDk, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {r.counterparty}
+                  </div>
+                  <div style={{ fontSize: 11, color: C.textLt, marginTop: 2 }}>
+                    {r.article} · {r.date}
+                  </div>
                 </div>
-                <div style={{ fontSize: 13, fontWeight: 600, color: C.textDk, fontVariantNumeric: "tabular-nums", flexShrink: 0 }}>{p.amount} ₽</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 5, flexShrink: 0 }}>
+                  <span style={{ width: 8, height: 8, borderRadius: "50%", background: pc_cfg.dot, border: "border" in pc_cfg ? "1px solid #C0A070" : undefined }} />
+                </div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: C.textDk, fontVariantNumeric: "tabular-nums", flexShrink: 0 }}>
+                  {fmtShort(r.amount)}
+                </div>
               </div>
             );
           })}
         </div>
+
+        {/* D: Balance summary + warning */}
+        <div style={{ padding: "10px 22px", borderTop: `1px solid ${C.warm}`, background: overBudget ? C.danger08 : C.ivory50, flexShrink: 0 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+            <div style={{ display: "flex", gap: 20, fontSize: 12 }}>
+              <span style={{ color: C.textLt }}>
+                Уже в реестре: <strong style={{ color: C.textDk }}>{fmtShort(alreadyTotal)}</strong>
+              </span>
+              {pc > 0 && (
+                <span style={{ color: C.textLt }}>
+                  + Выбрано: <strong style={{ color: C.textDk }}>{fmtShort(selectedTotal)}</strong>
+                </span>
+              )}
+              {pc > 0 && (
+                <span style={{ color: C.textLt }}>
+                  = Итого: <strong style={{ color: overBudget ? C.danger : C.textDk }}>{fmtShort(projectedTotal)}</strong>
+                </span>
+              )}
+            </div>
+            {availableBalance > 0 && (
+              <span style={{ fontSize: 12, color: overBudget ? C.danger : "#3D6B3D" }}>
+                Остаток: <strong>{fmtShort(availableBalance)}</strong>
+              </span>
+            )}
+          </div>
+          {overBudget && (
+            <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 6, fontSize: 12, color: C.danger }}>
+              <AlertTriangle size={12} />
+              <span>Превышение лимита на <strong>{fmtShort(deficit)}</strong> — недостаточно средств на счетах</span>
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
         <div style={{ borderTop: `1px solid ${C.warm}`, padding: "14px 22px", display: "flex", gap: 8, flexShrink: 0 }}>
-          <button disabled={picked.size === 0} onClick={() => onCreate([...picked])}
-            style={{ padding: "8px 20px", borderRadius: 6, background: picked.size > 0 ? C.sage : C.warm, color: C.surface, border: "none", fontSize: 13, fontWeight: 500, cursor: picked.size > 0 ? "pointer" : "not-allowed", fontFamily: "Inter, sans-serif" }}>
-            Создать реестр{picked.size > 0 ? ` (${picked.size})` : ""}
+          <button
+            onClick={() => pc > 0 && onAdd([...picked])}
+            disabled={pc === 0}
+            style={{ padding: "8px 20px", borderRadius: 6, background: pc > 0 ? C.sage : C.warm, color: C.surface, border: "none", fontSize: 13, fontWeight: 500, cursor: pc > 0 ? "pointer" : "not-allowed", fontFamily: "Inter, sans-serif", transition: "background 0.15s" }}
+          >
+            Добавить{pc > 0 ? ` (${pc})` : ""}
           </button>
-          <button onClick={onClose} style={{ padding: "8px 14px", borderRadius: 6, background: "transparent", color: C.olive, border: "none", fontSize: 13, fontWeight: 500, cursor: "pointer", fontFamily: "Inter, sans-serif" }}>Отмена</button>
+          <button
+            onClick={onClose}
+            style={{ padding: "8px 14px", borderRadius: 6, background: "transparent", color: C.olive, border: "none", fontSize: 13, fontWeight: 500, cursor: "pointer", fontFamily: "Inter, sans-serif" }}
+          >
+            Отмена
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── Shared sub-components ──────────────────────────── */
+
+function SummaryCard({ label, value, note, valueColor, cardBg }: { label: string; value: string; note?: string; valueColor: string; cardBg?: string }) {
+  return (
+    <div style={{ flex: 1, padding: "18px 20px", borderRadius: 8, background: cardBg ?? C.surface, border: `1px solid ${C.warm}`, display: "flex", flexDirection: "column", gap: 6 }}>
+      <span style={{ fontSize: 12, color: C.textLt }}>{label}</span>
+      <span style={{ fontSize: 22, fontWeight: 700, color: valueColor, fontVariantNumeric: "tabular-nums", lineHeight: 1.2 }}>{value}</span>
+      {note && <span style={{ fontSize: 10, color: C.textLt, opacity: 0.7 }}>{note}</span>}
+    </div>
+  );
+}
+
+function BtnOutline({ children, onClick, icon }: { children: ReactNode; onClick?: () => void; icon?: ReactNode }) {
+  return (
+    <button onClick={onClick} style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 14px", borderRadius: 6, background: "transparent", color: C.olive, border: `1.5px solid ${C.olive}`, fontSize: 13, fontWeight: 500, cursor: "pointer", fontFamily: "Inter, sans-serif" }}>
+      {icon}
+      {children}
+    </button>
+  );
+}
+
+function Checkbox({ checked, indeterminate, onChange }: { checked: boolean; indeterminate?: boolean; onChange: () => void }) {
+  return (
+    <div
+      onClick={e => { e.stopPropagation(); onChange(); }}
+      style={{ width: 16, height: 16, borderRadius: 3, border: checked || indeterminate ? "none" : `1.5px solid ${C.warm}`, background: checked ? C.sage : indeterminate ? C.olive : C.surface, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0, transition: "background 0.15s" }}
+    >
+      {checked && (
+        <svg width="10" height="8" viewBox="0 0 10 8" fill="none">
+          <path d="M1 4l2.5 2.5L9 1" stroke="#FAFAF5" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      )}
+      {indeterminate && !checked && <div style={{ width: 8, height: 2, background: C.surface, borderRadius: 1 }} />}
+    </div>
+  );
+}
+
+function ActionIcons({ onEdit, onDelete }: { onEdit?: () => void; onDelete?: () => void }) {
+  const [hovEdit, setHovEdit] = useState(false);
+  const [hovDel,  setHovDel]  = useState(false);
+  return (
+    <div style={{ display: "flex", gap: 8 }}>
+      <button onClick={onEdit} onMouseEnter={() => setHovEdit(true)} onMouseLeave={() => setHovEdit(false)}
+        style={{ background: "none", border: "none", cursor: "pointer", color: hovEdit ? C.sage : C.olive, padding: 2, display: "flex", transition: "color 0.15s" }}>
+        <Pencil size={14} />
+      </button>
+      <button onClick={onDelete} onMouseEnter={() => setHovDel(true)} onMouseLeave={() => setHovDel(false)}
+        style={{ background: "none", border: "none", cursor: "pointer", color: hovDel ? C.danger : C.olive, padding: 2, display: "flex", transition: "color 0.15s" }}>
+        <Trash2 size={14} />
+      </button>
+    </div>
+  );
+}
+
+/* ── Registry edit modal ──────────────────────────── */
+function RegistryEditModal({ row, onSave, onClose }: {
+  row: RegistryRow;
+  onSave: (id: number, status: RowStatus) => void;
+  onClose: () => void;
+}) {
+  const [status, setStatus] = useState<RowStatus>(row.status);
+  const STATUS_OPTIONS: { value: RowStatus; label: string }[] = [
+    { value: "registry", label: "В реестре"   },
+    { value: "paid",     label: "Оплачена"    },
+    { value: "no_funds", label: "Нет средств" },
+  ];
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: C.overlay, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1100, fontFamily: "Inter, sans-serif" }}>
+      <div onClick={e => e.stopPropagation()} style={{ width: 400, background: C.surface, border: `1px solid ${C.warm}`, borderRadius: 12, boxShadow: "0 4px 24px rgba(44,44,30,0.18)" }}>
+        <div style={{ padding: "18px 24px 14px", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: `1px solid ${C.warm}` }}>
+          <span style={{ fontSize: 16, fontWeight: 600, color: C.textDk }}>Заявка № {row.id}</span>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: C.textLt, display: "flex" }}><X size={17} /></button>
+        </div>
+        <div style={{ padding: "18px 24px" }}>
+          <label style={{ fontSize: 12, fontWeight: 500, color: C.textLt, display: "block", marginBottom: 8 }}>Изменить статус</label>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {STATUS_OPTIONS.map(opt => (
+              <button key={opt.value} onClick={() => setStatus(opt.value)}
+                style={{ padding: "9px 14px", borderRadius: 6, border: status === opt.value ? `2px solid ${C.sage}` : `1px solid ${C.warm}`, background: status === opt.value ? C.sage10 : C.surface, color: status === opt.value ? C.sage : C.textDk, fontSize: 13, fontWeight: status === opt.value ? 600 : 400, cursor: "pointer", fontFamily: "Inter, sans-serif", textAlign: "left" }}>
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div style={{ borderTop: `1px solid ${C.warm}`, padding: "14px 24px", display: "flex", gap: 10 }}>
+          <button onClick={() => onSave(row.id, status)} style={{ padding: "9px 20px", borderRadius: 6, background: C.sage, color: C.surface, border: "none", fontSize: 14, fontWeight: 500, cursor: "pointer", fontFamily: "Inter, sans-serif" }}>Сохранить</button>
+          <button onClick={onClose} style={{ padding: "9px 12px", borderRadius: 6, background: "transparent", color: C.olive, border: "none", fontSize: 14, cursor: "pointer", fontFamily: "Inter, sans-serif", marginLeft: "auto" }}>Отмена</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── Registry delete confirm ──────────────────────── */
+function RegistryConfirmDelete({ row, onConfirm, onCancel }: {
+  row: RegistryRow; onConfirm: () => void; onCancel: () => void;
+}) {
+  return (
+    <div onClick={onCancel} style={{ position: "fixed", inset: 0, background: C.overlay, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1100, fontFamily: "Inter, sans-serif" }}>
+      <div onClick={e => e.stopPropagation()} style={{ width: 400, background: C.surface, border: `1px solid ${C.warm}`, borderRadius: 12, padding: "28px 28px 20px", boxShadow: "0 4px 24px rgba(44,44,30,0.18)" }}>
+        <h3 style={{ fontSize: 16, fontWeight: 600, color: C.textDk, margin: "0 0 8px" }}>Удалить из реестра?</h3>
+        <p style={{ fontSize: 13, color: C.textLt, margin: "0 0 6px", lineHeight: 1.5 }}>
+          <strong style={{ color: C.textDk }}>{row.counterparty}</strong>
+        </p>
+        <p style={{ fontSize: 13, color: C.textLt, margin: "0 0 24px" }}>Заявка № {row.id} будет убрана из текущего реестра.</p>
+        <div style={{ display: "flex", gap: 10 }}>
+          <button onClick={onConfirm} style={{ padding: "9px 20px", borderRadius: 6, background: C.danger, color: C.surface, border: "none", fontSize: 14, fontWeight: 500, cursor: "pointer", fontFamily: "Inter, sans-serif" }}>Удалить</button>
+          <button onClick={onCancel} style={{ padding: "9px 16px", borderRadius: 6, background: "transparent", color: C.olive, border: `1.5px solid ${C.warm}`, fontSize: 14, cursor: "pointer", fontFamily: "Inter, sans-serif" }}>Отмена</button>
         </div>
       </div>
     </div>

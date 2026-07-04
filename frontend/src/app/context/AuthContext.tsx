@@ -22,13 +22,14 @@ export type Screen =
   | "dashboard"
   | "calendar" | "requests" | "income"
   | "registry" | "reports" | "references"
+  | "recurring"
   | "audit";
 
 export const ROLE_SCREENS: Record<Role, Screen[]> = {
-  initiator: ["dashboard", "calendar", "requests", "income", "references"],
-  treasurer: ["dashboard", "calendar", "requests", "income", "registry", "reports", "references"],
-  manager:   ["dashboard", "calendar", "requests", "income", "registry", "reports", "references"],
-  admin:     ["dashboard", "calendar", "requests", "income", "registry", "reports", "references", "audit"],
+  initiator: ["dashboard", "calendar", "requests", "recurring", "income", "references"],
+  treasurer: ["dashboard", "calendar", "requests", "recurring", "income", "registry", "reports", "references"],
+  manager:   ["dashboard", "calendar", "requests", "recurring", "income", "registry", "reports", "references"],
+  admin:     ["dashboard", "calendar", "requests", "recurring", "income", "registry", "reports", "references", "audit"],
 };
 
 export interface Permissions {

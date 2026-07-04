@@ -1,4 +1,4 @@
-import { createContext, useContext, useRef, useState, useEffect } from "react";
+import { createContext, useContext, useRef, useState, useEffect, type ReactNode } from "react";
 
 export type ToastType = "success" | "warning" | "error";
 
@@ -28,7 +28,7 @@ const TOAST_CFG: Record<ToastType, { bg: string; textColor: string; border: stri
   error:   { bg: "var(--tm-danger)",      textColor: "var(--tm-surface)",  border: "rgba(0,0,0,0.15)",      icon: "✕" },
 };
 
-export function ToastProvider({ children }: { children: React.ReactNode }) {
+export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const nextId = useRef(1);
 

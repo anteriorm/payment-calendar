@@ -1,3 +1,4 @@
+import { type CSSProperties } from "react";
 import { C } from "../tokens";
 
 /**
@@ -10,7 +11,7 @@ interface TableSkeletonProps {
   rowH?:   number;
 }
 
-const pulse: React.CSSProperties = {
+const pulse: CSSProperties = {
   background: `linear-gradient(90deg, ${C.ivory} 25%, ${C.warm} 50%, ${C.ivory} 75%)`,
   backgroundSize: "200% 100%",
   animation: "skeleton-pulse 1.4s ease-in-out infinite",

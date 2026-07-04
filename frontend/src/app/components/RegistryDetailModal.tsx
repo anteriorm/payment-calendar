@@ -1,14 +1,15 @@
 /**
  * RegistryDetailModal — детальная страница реестра платежей.
- * Данные загружаются из GET /api/registries/{id}
+ *
+ * STUB: данные берутся из api.registries.getOne(id).
+ * Бэкенд должен реализовать GET /api/registries/{id}
  */
 
 import { useState, useEffect } from "react";
 import { X, Download, CheckCircle, XCircle } from "lucide-react";
 import { C } from "../tokens";
 import { useToast } from "./Toast";
-import { exportCsv, kopecksToRub } from "../utils";
-import * as api from "../../api";
+import { exportCsv, formatAmount, getAccountCurrency } from "../utils";
 
 interface RegistryRow {
   id:           number;
@@ -31,19 +32,35 @@ interface RegistryDetail {
   rows:          RegistryRow[];
 }
 
+// STUB mock data — replace with GET /api/registries/{id}
+const MOCK_DETAIL: RegistryDetail = {
+  id:            1,
+  registry_date: "18.06.2026",
+  status:        "paid",
+  created_by:    "Петров И.А.",
+  approved_by:   "Козлова Е.В.",
+  total_amount:  1240000,
+  rows: [
+    { id: 2845, counterparty: "ООО Поставщик Альфа", article: "Аренда офиса",        amount: 420000, account: "Расчётный №1", date: "25.06.2026", priority: "high",   status: "paid" },
+    { id: 2846, counterparty: "ИП Смирнов А.В.",     article: "Заработная плата",    amount: 560000, account: "Расчётный №1", date: "28.06.2026", priority: "high",   status: "paid" },
+    { id: 2841, counterparty: "АО ТехСервис",        article: "Расходные материалы", amount: 187500, account: "Расчётный №2", date: "24.06.2026", priority: "low",    status: "paid" },
+    { id: 2842, counterparty: "ООО РентаГрупп",      article: "Услуги подрядчиков",  amount: 95000,  account: "Касса",        date: "26.06.2026", priority: "medium", status: "paid" },
+    { id: 2847, counterparty: "ПАО Энергоресурс",    article: "Налоги и сборы",      amount: 260000, account: "Расчётный №2", date: "27.06.2026", priority: "medium", status: "no_funds" },
+  ],
+};
 
-
+// FIX #6: все цвета бейджей — через токены палитры (меняются при смене темы)
 const STATUS_BADGE: Record<RegistryDetail["status"], { label: string; bg: string; color: string }> = {
-  draft:    { label: "Черновик",  bg: C.ivory,           color: C.textLt  },
-  approved: { label: "Утверждён", bg: C.sage10,          color: "#3D6B3D" },
-  paid:     { label: "Оплачен",   bg: C.sage,            color: C.surface },
-  canceled: { label: "Отменён",   bg: C.danger15,        color: "#8B2020" },
+  draft:    { label: "Черновик",  bg: C.badge.draft.bg,     color: C.badge.draft.color     },
+  approved: { label: "Утверждён", bg: C.badge.approved.bg,  color: C.badge.approved.color  },
+  paid:     { label: "Оплачен",   bg: C.badge.paid.bg,      color: C.badge.paid.color      },
+  canceled: { label: "Отменён",   bg: C.badge.rejected.bg,  color: C.badge.rejected.color  },
 };
 
 const ROW_STATUS_BADGE: Record<RegistryRow["status"], { label: string; bg: string; color: string }> = {
-  registry: { label: "В реестре",   bg: "rgba(160,160,128,0.20)", color: "#555540" },
-  paid:     { label: "Оплачена",    bg: C.sage,                   color: C.surface },
-  no_funds: { label: "Нет средств", bg: C.danger15,               color: "#8B2020" },
+  registry: { label: "В реестре",   bg: C.badge.inRegistry.bg, color: C.badge.inRegistry.color },
+  paid:     { label: "Оплачена",    bg: C.badge.paid.bg,        color: C.badge.paid.color       },
+  no_funds: { label: "Нет средств", bg: C.badge.rejected.bg,    color: C.badge.rejected.color   },
 };
 
 const PRIORITY_DOT: Record<RegistryRow["priority"], { dot: string; border?: boolean }> = {
@@ -52,11 +69,8 @@ const PRIORITY_DOT: Record<RegistryRow["priority"], { dot: string; border?: bool
   low:    { dot: C.sage                },
 };
 
-function ruFmt(n: number): string {
-  const s = Math.floor(n).toString();
-  const parts: string[] = [];
-  for (let i = s.length; i > 0; i -= 3) parts.unshift(s.slice(Math.max(0, i - 3), i));
-  return parts.join(" ") + ",00 ₽";
+function ruFmt(n: number, account = ""): string {
+  return formatAmount(n, getAccountCurrency(account));
 }
 
 interface RegistryDetailModalProps {
@@ -72,30 +86,11 @@ export function RegistryDetailModal({ registryId, onClose }: RegistryDetailModal
 
   useEffect(() => {
     setLoading(true);
-    api.registries.getOne(registryId)
-      .then(data => {
-        const mapped: RegistryDetail = {
-          id: data.id,
-          registry_date: data.registry_date,
-          status: data.status === "created" ? "approved" : data.status as any,
-          created_by: data.created_by || "",
-          approved_by: data.approved_by || undefined,
-          total_amount: data.total_amount || 0,
-          rows: (data.payments || []).map((p: any) => ({
-            id: p.id,
-            counterparty: p.counterparty || "",
-            article: p.article || "",
-            amount: kopecksToRub(p.amount || 0),
-            account: p.account || "",
-            date: p.date ? p.date.split("-").reverse().join(".") : "",
-            priority: p.priority || "medium",
-            status: data.status === "paid" ? "paid" : "registry",
-          })),
-        };
-        setDetail(mapped);
-      })
-      .catch(() => showToast("Ошибка загрузки реестра", "error"))
-      .finally(() => setLoading(false));
+    // STUB: api.registries.getOne(registryId).then(...)
+    setTimeout(() => {
+      setDetail({ ...MOCK_DETAIL, id: registryId });
+      setLoading(false);
+    }, 300);
   }, [registryId]);
 
   const handleExport = () => {
@@ -103,7 +98,7 @@ export function RegistryDetailModal({ registryId, onClose }: RegistryDetailModal
     exportCsv(
       `Реестр_${detail.registry_date}.csv`,
       ["№", "Контрагент", "Статья", "Сумма", "Счёт", "Дата", "Статус"],
-      detail.rows.map(r => [r.id, r.counterparty, r.article, ruFmt(r.amount), r.account, r.date, ROW_STATUS_BADGE[r.status].label]),
+      detail.rows.map(r => [r.id, r.counterparty, r.article, ruFmt(r.amount, r.account), r.account, r.date, ROW_STATUS_BADGE[r.status].label]),
     );
     showToast(`Реестр_${detail.registry_date}.csv скачан`, "success");
   };
@@ -138,7 +133,7 @@ export function RegistryDetailModal({ registryId, onClose }: RegistryDetailModal
           <div style={{ padding: "12px 24px", display: "flex", gap: 32, borderBottom: `1px solid ${C.warm}`, flexShrink: 0 }}>
             <MetaItem label="Создал" value={detail.created_by} />
             {detail.approved_by && <MetaItem label="Утвердил" value={detail.approved_by} />}
-            <MetaItem label="Итого" value={ruFmt(detail.total_amount)} bold />
+            <MetaItem label="Итого (RUB-экв.)" value={ruFmt(detail.total_amount)} bold />
           </div>
         )}
 
@@ -149,61 +144,79 @@ export function RegistryDetailModal({ registryId, onClose }: RegistryDetailModal
               Загрузка реестра…
             </div>
           ) : (
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-              <thead>
-                <tr style={{ background: C.warm, position: "sticky", top: 0 }}>
-                  {["№", "Контрагент", "Статья", "Сумма", "Счёт", "Дата", "Приоритет", "Статус"].map(col => (
-                    <th key={col} style={{ padding: "9px 12px", textAlign: "left", fontWeight: 600, color: C.textDk, fontSize: 12, whiteSpace: "nowrap" }}>
-                      {col}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {detail?.rows.map((row, i) => {
-                  const isHov = hovered === row.id;
-                  const rs = ROW_STATUS_BADGE[row.status];
-                  const pd = PRIORITY_DOT[row.priority];
-                  const bg = isHov ? C.beige30 : i % 2 === 0 ? C.surface : C.ivory50;
-                  return (
-                    <tr key={row.id}
-                      onMouseEnter={() => setHovered(row.id)}
-                      onMouseLeave={() => setHovered(null)}
-                      style={{ background: bg, transition: "background 0.1s" }}>
-                      <td style={{ padding: "9px 12px", color: C.textLt, fontVariantNumeric: "tabular-nums" }}>{row.id}</td>
-                      <td style={{ padding: "9px 12px", color: C.textDk, fontWeight: 500, whiteSpace: "nowrap" }}>{row.counterparty}</td>
-                      <td style={{ padding: "9px 12px", color: C.textLt, whiteSpace: "nowrap" }}>{row.article}</td>
-                      <td style={{ padding: "9px 12px", color: C.textDk, fontWeight: 600, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>{ruFmt(row.amount)}</td>
-                      <td style={{ padding: "9px 12px", color: C.textLt, whiteSpace: "nowrap" }}>{row.account}</td>
-                      <td style={{ padding: "9px 12px", color: C.textLt, whiteSpace: "nowrap" }}>{row.date}</td>
-                      <td style={{ padding: "9px 12px" }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                          <div style={{ width: 8, height: 8, borderRadius: "50%", background: pd.dot, flexShrink: 0, border: pd.border ? "1px solid #C0A070" : undefined }} />
-                        </div>
-                      </td>
-                      <td style={{ padding: "9px 12px" }}>
-                        <span style={{ padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 500, background: rs.bg, color: rs.color, whiteSpace: "nowrap" }}>
-                          {rs.label}
-                        </span>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
+            <div style={{ fontSize: 13, minWidth: 680 }}>
+
+              {/* Шапка */}
+              <div style={{
+                display: "grid",
+                gridTemplateColumns: "50px 1fr 120px 130px 120px 80px 70px 120px",
+                background: C.ivory50,
+                position: "sticky", top: 0,
+                borderBottom: `1px solid ${C.warm}`,
+              }}>
+                {["№", "Контрагент", "Статья", "Сумма", "Счёт", "Дата", "Прит.", "Статус"].map(col => (
+                  <div key={col} style={{
+                    padding: "9px 10px", fontWeight: 600,
+                    color: C.textDk, fontSize: 12, whiteSpace: "nowrap",
+                  }}>
+                    {col}
+                  </div>
+                ))}
+              </div>
+
+              {/* Строки */}
+              {detail?.rows.map((row, i) => {
+                const isHov = hovered === row.id;
+                const rs = ROW_STATUS_BADGE[row.status];
+                const pd = PRIORITY_DOT[row.priority];
+                const bg = isHov ? C.beige30 : i % 2 === 0 ? C.surface : C.ivory50;
+                return (
+                  <div key={row.id}
+                    onMouseEnter={() => setHovered(row.id)}
+                    onMouseLeave={() => setHovered(null)}
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "50px 1fr 120px 130px 120px 80px 70px 120px",
+                      background: bg, transition: "background 0.1s",
+                      borderBottom: `1px solid rgba(0,0,0,0.05)`,
+                    }}>
+                    <div style={{ padding: "9px 10px", color: C.textLt, fontVariantNumeric: "tabular-nums", display: "flex", alignItems: "center" }}>{row.id}</div>
+                    <div style={{ padding: "9px 10px", color: C.textDk, fontWeight: 500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", display: "flex", alignItems: "center" }}>{row.counterparty}</div>
+                    <div style={{ padding: "9px 10px", color: C.textLt, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", display: "flex", alignItems: "center" }}>{row.article}</div>
+                    <div style={{ padding: "9px 10px", color: C.textDk, fontWeight: 600, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap", display: "flex", alignItems: "center" }}>{ruFmt(row.amount, row.account)}</div>
+                    <div style={{ padding: "9px 10px", color: C.textLt, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", display: "flex", alignItems: "center" }}>{row.account}</div>
+                    <div style={{ padding: "9px 10px", color: C.textLt, whiteSpace: "nowrap", display: "flex", alignItems: "center" }}>{row.date}</div>
+                    <div style={{ padding: "9px 10px", display: "flex", alignItems: "center" }}>
+                      <div style={{ width: 8, height: 8, borderRadius: "50%", background: pd.dot, flexShrink: 0, border: pd.border ? `1px solid ${C.warm}` : undefined }} />
+                    </div>
+                    <div style={{ padding: "9px 10px", display: "flex", alignItems: "center" }}>
+                      <span style={{ padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 500, background: rs.bg, color: rs.color, whiteSpace: "nowrap" }}>
+                        {rs.label}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+
+              {/* Итого */}
               {detail && (
-                <tfoot>
-                  <tr style={{ background: C.warm }}>
-                    <td colSpan={3} style={{ padding: "9px 12px", fontWeight: 700, color: C.textDk, fontSize: 13 }}>
-                      Итого: {detail.rows.length} заявок
-                    </td>
-                    <td style={{ padding: "9px 12px", fontWeight: 700, color: C.textDk, fontVariantNumeric: "tabular-nums" }}>
-                      {ruFmt(detail.total_amount)}
-                    </td>
-                    <td colSpan={4} />
-                  </tr>
-                </tfoot>
+                <div style={{
+                  display: "grid",
+                  gridTemplateColumns: "50px 1fr 120px 130px 120px 80px 70px 120px",
+                  background: C.ivory50,
+                  borderTop: `2px solid ${C.warm}`,
+                }}>
+                  <div style={{ padding: "9px 10px", gridColumn: "1 / 4", fontWeight: 700, color: C.textDk, fontSize: 13, display: "flex", alignItems: "center" }}>
+                    Итого: {detail.rows.length} заявок
+                  </div>
+                  <div style={{ padding: "9px 10px", fontWeight: 700, color: C.textDk, fontVariantNumeric: "tabular-nums", display: "flex", alignItems: "center", flexDirection: "column", gap: 2 }}>
+                    <span>{ruFmt(detail.total_amount)}</span>
+                    <span style={{ fontSize: 10, color: C.textLt, fontWeight: 400 }}>RUB-экв.</span>
+                  </div>
+                  <div style={{ gridColumn: "5 / 9" }} />
+                </div>
               )}
-            </table>
+            </div>
           )}
         </div>
 
