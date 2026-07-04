@@ -97,15 +97,6 @@ export function Income({ onCreateIncome, canCreate = true }: IncomeProps) {
   const [selected,   setSelected]   = useState<Set<number>>(new Set());
   const [activePage, setActivePage] = useState(1);
 
-  const loadData = () => {
-    setLoading(true); setLoadError(null);
-    api.incomes.getAll()
-      .then(data => setRows((data as unknown[]).map(i => mapApiToIncome(i as Record<string, unknown>))))
-      .catch(() => setLoadError("Не удалось загрузить поступления"))
-      .finally(() => setLoading(false));
-  };
-  useEffect(() => { loadData(); }, []);
-  useEffect(() => { setActivePage(1); }, [search, statusF, accountF]);
   const [editTarget, setEditTarget] = useState<IncomeRow | null>(null);
   const [delTarget,  setDelTarget]  = useState<IncomeRow | null>(null);
   const [showCreate, setShowCreate] = useState(false);
