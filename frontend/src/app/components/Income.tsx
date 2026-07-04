@@ -1,14 +1,16 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, type CSSProperties, type ReactNode } from "react";
 import { TableSkeleton, TableError } from "./TableSkeleton";
 import { ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
 import * as api from "../../api";
 import { Search, ChevronDown, Edit2, Trash2, FolderOpen, X, BarChart2 } from "lucide-react";
 import { C } from "../tokens";
 import { useToast } from "./Toast";
-import { exportCsv, kopecksToRub, rubToKopecks, formatRubFromRub } from "../utils";
+import { exportCsv, kopecksToRub, rubToKopecks, formatRubFromRub, getAccountCurrency, formatAmount } from "../utils";
 import { required, positiveAmount, dateRu } from "../utils/validation";
 
 type IncomeStatus = "planned" | "confirmed" | "received";
+
+type IncomePriority = "high" | "medium" | "low";
 
 interface IncomeRow {
   id:           number;
@@ -19,6 +21,7 @@ interface IncomeRow {
   date:         string;
   account:      string;
   status:       IncomeStatus;
+  priority:     IncomePriority;
 }
 
 const STATUS_CFG: Record<IncomeStatus, { bg: string; color: string; label: string }> = {
@@ -28,15 +31,15 @@ const STATUS_CFG: Record<IncomeStatus, { bg: string; color: string; label: strin
 };
 
 const ROWS: IncomeRow[] = [
-  { id: 2303, counterparty: "ПАО Инвестбанк",    article: "Прочие доходы",       purpose: "Проценты по депозиту",   amount: 32000,  date: "30.06.2026", account: "Касса",        status: "planned"   },
-  { id: 2302, counterparty: "ИП Коваленко Д.М.", article: "Прочие доходы",       purpose: "Возврат переплаты",      amount: 45000,  date: "26.06.2026", account: "Расчётный №2", status: "planned"   },
-  { id: 2301, counterparty: "ООО Альфа-Трейд",   article: "Выручка от клиентов", purpose: "Оплата за услуги июнь",  amount: 280000, date: "25.06.2026", account: "Расчётный №1", status: "confirmed" },
-  { id: 2304, counterparty: "АО СтройИнвест",    article: "Выручка от клиентов", purpose: "Частичная оплата дог.7", amount: 185000, date: "24.06.2026", account: "Расчётный №1", status: "confirmed" },
-  { id: 2300, counterparty: "АО СтройГрупп",     article: "Выручка от клиентов", purpose: "Аванс по договору №12",  amount: 650000, date: "20.06.2026", account: "Расчётный №1", status: "received"  },
-  { id: 2299, counterparty: "ООО ЛогистикПро",   article: "Выручка от клиентов", purpose: "Оплата счёта № 145",     amount: 120000, date: "18.06.2026", account: "Расчётный №2", status: "received"  },
+  { id: 2303, counterparty: "ПАО Инвестбанк",    article: "Прочие доходы",       purpose: "Проценты по депозиту",   amount: 32000,  date: "30.06.2026", account: "Касса",        status: "planned",   priority: "low"    },
+  { id: 2302, counterparty: "ИП Коваленко Д.М.", article: "Прочие доходы",       purpose: "Возврат переплаты",      amount: 45000,  date: "26.06.2026", account: "Расчётный №2", status: "planned",   priority: "medium" },
+  { id: 2301, counterparty: "ООО Альфа-Трейд",   article: "Выручка от клиентов", purpose: "Оплата за услуги июнь",  amount: 280000, date: "25.06.2026", account: "Расчётный №1", status: "confirmed", priority: "high"   },
+  { id: 2304, counterparty: "АО СтройИнвест",    article: "Выручка от клиентов", purpose: "Частичная оплата дог.7", amount: 185000, date: "24.06.2026", account: "Расчётный №1", status: "confirmed", priority: "high"   },
+  { id: 2300, counterparty: "АО СтройГрупп",     article: "Выручка от клиентов", purpose: "Аванс по договору №12",  amount: 650000, date: "20.06.2026", account: "Расчётный №1", status: "received",  priority: "high"   },
+  { id: 2299, counterparty: "ООО ЛогистикПро",   article: "Выручка от клиентов", purpose: "Оплата счёта № 145",     amount: 120000, date: "18.06.2026", account: "Расчётный №2", status: "received",  priority: "medium" },
 ];
 
-const COLS = "40px 56px 1fr 130px 150px 130px 90px 120px 130px 90px";
+const COLS = "40px 56px 1fr 120px 130px 120px 82px 100px 80px 120px 90px";
 
 /** Плановое → Подтверждено → Получено (по жизненному циклу поступления) */
 const INCOME_STATUS_ORDER: Record<IncomeStatus, number> = {
@@ -70,10 +73,11 @@ function mapApiToIncome(i: Record<string, unknown>): IncomeRow {
     counterparty: (i.counterparty ?? "") as string,
     article:      ((i.item ?? i.article) ?? "") as string,
     purpose:      (i.purpose ?? "") as string,
-    amount:       kopecksToRub((i.amount ?? 0) as number),  // копейки → рубли
+    amount:       kopecksToRub((i.amount ?? 0) as number),
     date,
     account:      ((i.account_name ?? i.account) ?? "") as string,
     status:       ((i.status) ?? "planned") as IncomeStatus,
+    priority:     ((i.priority) ?? "medium") as IncomePriority,
   };
 }
 
@@ -252,7 +256,7 @@ export function Income({ onCreateIncome, canCreate = true }: IncomeProps) {
             <div style={{ padding: "10px 12px", display: "flex", alignItems: "center" }}>
               <CheckBox checked={allSelected} onChange={toggleAll} />
             </div>
-            {([["№",""], ["counterparty","Контрагент"], ["article","Статья"], ["purpose","Назначение"], ["amount","Сумма ↑"], ["date","Дата"], ["account","Счёт"], ["status","Статус"], ["","Действия"]] as [string,string][]).map(([key, label], i) => {
+            {([["№",""], ["counterparty","Контрагент"], ["article","Статья"], ["purpose","Назначение"], ["amount","Сумма ↑"], ["date","Дата"], ["account","Счёт"], ["priority","Приоритет"], ["status","Статус"], ["","Действия"]] as [string,string][]).map(([key, label], i) => {
               const sortable = !!key && key !== "№";
               const active = sortKey === key;
               return (
@@ -297,11 +301,14 @@ export function Income({ onCreateIncome, canCreate = true }: IncomeProps) {
                 {/* Сумма — зелёная со стрелкой ↑ */}
                 <div style={{ padding: "10px 10px", display: "flex", alignItems: "center", gap: 4, whiteSpace: "nowrap" }}>
                   <span style={{ fontSize: 13, color: C.sage, fontWeight: 600 }}>↑</span>
-                  <span style={{ fontSize: 13, fontWeight: 600, color: C.sage, fontVariantNumeric: "tabular-nums" }}>{formatRubFromRub(row.amount)}</span>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: C.sage, fontVariantNumeric: "tabular-nums" }}>{formatAmount(row.amount, getAccountCurrency(row.account))}</span>
                 </div>
                 <div style={{ padding: "10px 10px", display: "flex", alignItems: "center", fontSize: 12, color: C.textLt, whiteSpace: "nowrap" }}>{row.date}</div>
                 <div style={{ padding: "10px 10px", display: "flex", alignItems: "center", fontSize: 12, color: C.textLt, overflow: "hidden" }}>
                   <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.account}</span>
+                </div>
+                <div style={{ padding: "10px 10px", display: "flex", alignItems: "center", gap: 5 }}>
+                  {(() => { const pc = INCOME_PRIORITY_CFG[row.priority ?? "medium"]; return (<><span style={{ width: 8, height: 8, borderRadius: "50%", background: pc.dot, flexShrink: 0, border: row.priority === "medium" ? "1px solid #C0A070" : undefined }} /><span style={{ fontSize: 12, color: C.textLt, whiteSpace: "nowrap" }}>{pc.label}</span></>); })()}
                 </div>
                 <div style={{ padding: "10px 10px", display: "flex", alignItems: "center" }}>
                   <span style={{ display: "inline-flex", alignItems: "center", padding: "3px 8px", borderRadius: 4, fontSize: 11, fontWeight: 500, background: sc.bg, color: sc.color, whiteSpace: "nowrap" }}>
@@ -420,7 +427,7 @@ function CheckBox({ checked, onChange }: { checked: boolean; onChange: () => voi
   );
 }
 
-function IconBtn({ children, title, hoverColor, onClick }: { children: React.ReactNode; title: string; hoverColor: string; onClick?: () => void }) {
+function IconBtn({ children, title, hoverColor, onClick }: { children: ReactNode; title: string; hoverColor: string; onClick?: () => void }) {
   const [hov, setHov] = useState(false);
   return (
     <button title={title} onClick={onClick} onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}
@@ -433,19 +440,26 @@ function IconBtn({ children, title, hoverColor, onClick }: { children: React.Rea
 /* ── Income form modal ──────────────────────────────── */
 type IncomeFormData = Omit<IncomeRow, "id" | "status">;
 
+const INCOME_PRIORITY_CFG: Record<IncomePriority, { dot: string; label: string; accent: string; bg: string }> = {
+  high:   { dot: C.danger, label: "Высокий", accent: C.danger,  bg: C.danger08              },
+  medium: { dot: C.beige,  label: "Средний", accent: "#7A5A30", bg: "rgba(224,192,160,0.22)" },
+  low:    { dot: C.sage,   label: "Низкий",  accent: C.sage,    bg: C.sage10                 },
+};
+
 function IncomeFormModal({ initial, onSave, onClose }: {
   initial: IncomeRow | null;
   onSave: (data: IncomeFormData) => void;
   onClose: () => void;
 }) {
-  const [counterparty, setCp]  = useState(initial?.counterparty ?? "");
-  const [article,      setArt] = useState(initial?.article      ?? "");
-  const [purpose,      setPur] = useState(initial?.purpose      ?? "");
-  const [amount,       setAmt] = useState(initial ? String(initial.amount) : "");
-  const [date,         setDate]= useState(initial?.date         ?? "26.06.2026");
-  const [account,      setAcc] = useState(initial?.account      ?? "");
+  const [counterparty, setCp]      = useState(initial?.counterparty ?? "");
+  const [article,      setArt]     = useState(initial?.article      ?? "");
+  const [purpose,      setPur]     = useState(initial?.purpose      ?? "");
+  const [amount,       setAmt]     = useState(initial ? String(initial.amount) : "");
+  const [date,         setDate]    = useState(initial?.date         ?? "26.06.2026");
+  const [account,      setAcc]     = useState(initial?.account      ?? "");
+  const [priority,     setPriority]= useState<IncomePriority>(initial?.priority ?? "medium");
 
-  const inp: React.CSSProperties = { width: "100%", padding: "9px 12px", borderRadius: 6, background: C.surface, border: `1px solid ${C.warm}`, fontSize: 14, color: C.textDk, outline: "none", fontFamily: "Inter, sans-serif", boxSizing: "border-box" };
+  const inp: CSSProperties = { width: "100%", padding: "9px 12px", borderRadius: 6, background: C.surface, border: `1px solid ${C.warm}`, fontSize: 14, color: C.textDk, outline: "none", fontFamily: "Inter, sans-serif", boxSizing: "border-box" };
   const [errors, setErrors] = useState<Record<string,string>>({});
 
   const validate = () => {
@@ -472,7 +486,7 @@ function IncomeFormModal({ initial, onSave, onClose }: {
         <div style={{ padding: "18px 24px", display: "flex", flexDirection: "column", gap: 14 }}>
           <div style={{ display: "flex", gap: 12 }}>
             <div style={{ flex: 1 }}><FLabel>Контрагент</FLabel><input value={counterparty} onChange={e => setCp(e.target.value)} style={inp} placeholder="ООО Альфа-Трейд" /></div>
-            <div style={{ flex: "0 0 140px" }}><FLabel>Сумма ₽</FLabel>
+            <div style={{ flex: "0 0 140px" }}><FLabel>Сумма ({getAccountCurrency(account) || "RUB"})</FLabel>
               <div style={{ position: "relative" }}>
                 <input value={amount} onChange={e => { setAmt(e.target.value); setErrors(p => ({...p, amount:""})); }} style={{ ...inp, paddingRight: 28, ...(errors.amount ? {border:`1.5px solid ${C.danger}`} : {}) }} placeholder="0" />
                 <span style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", color: C.sage, fontSize: 14, fontWeight: 600, pointerEvents: "none" }}>↑</span>
@@ -495,9 +509,24 @@ function IncomeFormModal({ initial, onSave, onClose }: {
               <option value="Касса">Касса</option>
             </select>
           </div>
+          <div>
+            <FLabel>Приоритет</FLabel>
+            <div style={{ display: "flex", gap: 8 }}>
+              {(Object.entries(INCOME_PRIORITY_CFG) as [IncomePriority, typeof INCOME_PRIORITY_CFG[IncomePriority]][]).map(([val, cfg]) => {
+                const sel = priority === val;
+                return (
+                  <button key={val} onClick={() => setPriority(val)}
+                    style={{ flex: 1, padding: "9px 0", borderRadius: 6, border: sel ? `2px solid ${cfg.accent}` : `1px solid ${C.warm}`, background: sel ? cfg.bg : C.surface, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 7, fontFamily: "Inter, sans-serif", fontSize: 13, fontWeight: sel ? 600 : 400, color: sel ? cfg.accent : C.textLt, transition: "all 0.15s" }}>
+                    <span style={{ width: 9, height: 9, borderRadius: "50%", background: cfg.dot, flexShrink: 0, border: val === "medium" ? "1px solid #C0A070" : undefined }} />
+                    {cfg.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
         </div>
         <div style={{ borderTop: `1px solid ${C.warm}`, padding: "14px 24px", display: "flex", gap: 10 }}>
-          <button onClick={() => { if (validate()) onSave({ counterparty, article, purpose, amount: parseFloat(amount.replace(/\s/g,"").replace(",",".")) || 0, date, account }); }}
+          <button onClick={() => { if (validate()) onSave({ counterparty, article, purpose, amount: parseFloat(amount.replace(/\s/g,"").replace(",",".")) || 0, date, account, priority }); }}
             style={{ padding: "9px 20px", borderRadius: 6, background: C.sage, color: C.surface, border: "none", fontSize: 14, fontWeight: 500, cursor: "pointer", fontFamily: "Inter, sans-serif" }}>
             Сохранить
           </button>
@@ -508,7 +537,7 @@ function IncomeFormModal({ initial, onSave, onClose }: {
   );
 }
 
-function FLabel({ children }: { children: React.ReactNode }) {
+function FLabel({ children }: { children: ReactNode }) {
   return <label style={{ fontSize: 12, fontWeight: 500, color: C.textLt, display: "block", marginBottom: 6 }}>{children}</label>;
 }
 
@@ -544,6 +573,7 @@ function SumCard({ label, value, color, bold }: { label: string; value: string; 
       <span style={{ fontSize: 14, fontWeight: bold ? 700 : 600, color, fontVariantNumeric: "tabular-nums" }}>
         ↑ {value}
       </span>
+      <span style={{ fontSize: 9, color: C.textLt, opacity: 0.65 }}>RUB-экв.</span>
     </div>
   );
 }

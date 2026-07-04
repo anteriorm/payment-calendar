@@ -1,16 +1,37 @@
-import { useState } from "react";
-import { X, AlertTriangle, Calendar, Check } from "lucide-react";
+import { useState, useEffect } from "react";
+import { X, AlertTriangle, Calendar } from "lucide-react";
 import { useToast } from "./Toast";
 import { C } from "../tokens";
 import { dateRu } from "../utils/validation";
+import { getAccountCurrency, formatAmount, getCurrencySymbol } from "../utils";
+import * as api from "../../api";
+import type { ApprovalStageInfo, ApprovalRoute } from "../../api";
+import { ApprovalStepper } from "./ApprovalStepper";
+import { useAuth } from "../context/AuthContext";
+
+// Maps calendar acc keys to account display names
+const ACC_KEY_TO_NAME: Record<string, string> = {
+  acc1:  "Расчётный №1",
+  acc2:  "Расчётный №2",
+  cash:  "Касса",
+  total: "Расчётный №1",
+};
 
 interface RequestDrawerProps {
-  onClose:          () => void;
-  isCashGap?:       boolean;
-  deficitAmount?:   number;
-  onReschedule?:    (from: string, to: string, amount: number, accKey?: string) => void;
-  paymentAccKey?:   string;  // счёт платежа ("acc1"|"acc2"|"cash"), для корректного переноса
-  canApprove?:      boolean;
+  onClose:              () => void;
+  isCashGap?:           boolean;
+  deficitAmount?:       number;
+  onReschedule?:        (from: string, to: string, amount: number, accKey?: string) => void;
+  paymentAccKey?:       string;
+  canApprove?:          boolean;
+  /** FIX #3: дата кликнутой ячейки — используется как from-дата переноса */
+  initialPaymentDate?:  string;
+  /** FIX #3: сумма расхода кликнутой ячейки — используется как сумма переноса */
+  initialExpense?:      number;
+  /** ID заявки для загрузки маршрута согласования */
+  paymentId?:           number;
+  /** Вызывается после approve/reject — родитель может обновить строку в таблице */
+  onApprovalChanged?:   (paymentId: number, stages: ApprovalStageInfo[]) => void;
 }
 
 type DrawerTab    = "history" | "log";
@@ -69,40 +90,59 @@ function nowStamp() {
   return "26.06.2026 " + new Date().toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
 }
 
-const PAYMENT_AMOUNT = 90000;
+// PAYMENT_AMOUNT: заменён на динамическое значение из кликнутой ячейки (initialExpense)
 
-export function RequestDrawer({ onClose, isCashGap, deficitAmount, onReschedule, canApprove = true, paymentAccKey = "acc1" }: RequestDrawerProps) {
+export function RequestDrawer({ onClose, isCashGap, deficitAmount, onReschedule, canApprove = true, paymentAccKey = "acc1", initialPaymentDate, initialExpense, paymentId = 2847, onApprovalChanged }: RequestDrawerProps) {
+  const accountName = ACC_KEY_TO_NAME[paymentAccKey] ?? "Расчётный №1";
+  const currency    = getAccountCurrency(accountName);
+  const currSym     = getCurrencySymbol(currency);
   const { showToast } = useToast();
+  const { user }      = useAuth();
+
+  const [approvalStages, setApprovalStages] = useState<ApprovalStageInfo[]>([]);
+  const [approvalRoute,  setApprovalRoute]  = useState<ApprovalRoute | undefined>();
+
+  useEffect(() => {
+    api.approvals.getApproval(paymentId).then(a => {
+      setApprovalStages((a as any)?.stages ?? []);
+      if ((a as any)?.routeId) {
+        api.approvals.getRoutes().then(routes => {
+          setApprovalRoute((routes as ApprovalRoute[]).find(r => r.id === (a as any).routeId));
+        });
+      }
+    });
+  }, [paymentId]);
 
   const [tab,          setTab]          = useState<DrawerTab>("history");
   const [status,       setStatus]       = useState<DrawerStatus>("pending");
   const [history,      setHistory]      = useState<HistoryEntry[]>(INITIAL_HISTORY);
   const [log,          setLog]          = useState<LogEntry[]>(INITIAL_LOG);
-  const [paymentDate,  setPaymentDate]  = useState("29.06.2026");
-  const [showReject,   setShowReject]   = useState(false);
-  const [rejectReason, setRejectReason] = useState("");
+
+  // Sync "История согласований" from real approval stages whenever they change
+  useEffect(() => {
+    const DECISION_LABEL: Record<string, string> = {
+      approved: "Согласована",
+      rejected: "Отклонена",
+      skipped:  "Пропущено",
+    };
+    const stageEntries: HistoryEntry[] = approvalStages
+      .filter(s => s.status === "approved" || s.status === "rejected" || s.status === "skipped")
+      .map(s => ({
+        employee: s.assignee,
+        decision: DECISION_LABEL[s.status] ?? s.status,
+        comment:  s.comment ?? "",
+        date:     s.actionDate ?? "—",
+      }));
+    if (stageEntries.length > 0) {
+      // Real stage data takes priority over static demo rows
+      setHistory(stageEntries);
+    }
+    // If no completed stages yet, INITIAL_HISTORY remains (demo data)
+  }, [approvalStages]);
+  const [paymentDate,  setPaymentDate]  = useState(initialPaymentDate ?? "29.06.2026");
   const [showDatePick, setShowDatePick] = useState(false);
   const [newDate,      setNewDate]      = useState(paymentDate);
   const [dateError,    setDateError]    = useState("");
-
-  function handleApprove() {
-    const stamp = nowStamp();
-    setStatus("approved");
-    setHistory(h => [...h, { employee: "Петров И.А.", decision: "Согласована", comment: "Утверждено казначеем", date: stamp }]);
-    setLog(l => [...l, { text: 'Статус изменён: "На согласовании" → "Согласована"', date: stamp, user: "Петров И.А." }]);
-    showToast("Заявка согласована", "success");
-  }
-
-  function handleRejectConfirm() {
-    if (!rejectReason.trim()) return;
-    const stamp = nowStamp();
-    setStatus("rejected");
-    setHistory(h => [...h, { employee: "Петров И.А.", decision: "Отклонена", comment: rejectReason, date: stamp }]);
-    setLog(l => [...l, { text: 'Статус изменён: "На согласовании" → "Отклонена"', date: stamp, user: "Петров И.А." }]);
-    setShowReject(false);
-    setRejectReason("");
-    showToast("Заявка отклонена", "error");
-  }
 
   function handleDateSave() {
     const err = dateRu(newDate);
@@ -110,15 +150,14 @@ export function RequestDrawer({ onClose, isCashGap, deficitAmount, onReschedule,
     setDateError("");
     const stamp = nowStamp();
     const old = paymentDate;
-    onReschedule?.(old, newDate, PAYMENT_AMOUNT, paymentAccKey); // передаём счёт платежа
+    onReschedule?.(old, newDate, initialExpense ?? 90000, paymentAccKey);
     setPaymentDate(newDate);
     setLog(l => [...l, { text: `Дата перенесена: ${old} → ${newDate}`, date: stamp, user: "Петров И.А." }]);
     setShowDatePick(false);
     showToast("Дата перенесена, остатки пересчитаны", "success");
   }
 
-  const badge     = STATUS_BADGE[status];
-  const isPending = status === "pending";
+  const badge = STATUS_BADGE[status];
 
   return (
     <div style={{
@@ -134,7 +173,7 @@ export function RequestDrawer({ onClose, isCashGap, deficitAmount, onReschedule,
         <div style={{ background: C.danger12, borderBottom: `2px solid ${C.danger}`, padding: "10px 20px", display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
           <AlertTriangle size={16} color={C.danger} />
           <span style={{ fontSize: 13, fontWeight: 600, color: C.danger }}>
-            Кассовый разрыв: −{ruFmt(deficitAmount ?? 0)} ₽
+            Кассовый разрыв: −{ruFmt(deficitAmount ?? 0)} {currSym}
           </span>
         </div>
       )}
@@ -164,11 +203,11 @@ export function RequestDrawer({ onClose, isCashGap, deficitAmount, onReschedule,
         {/* Requisites block */}
         <div style={{ background: C.ivory, borderRadius: 14, padding: "16px 18px" }}>
           <div style={{ fontSize: 24, fontWeight: 700, color: C.textDk, marginBottom: 14, fontVariantNumeric: "tabular-nums" }}>
-            {ruFmt(PAYMENT_AMOUNT)},00 ₽
+            {formatAmount(initialExpense ?? 90000, currency)}
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px 20px" }}>
             {[
-              { label: "Счёт",       value: "Расчётный счёт №1"   },
+              { label: "Счёт",       value: `${accountName} (${currency})`   },
               { label: "Дата",       value: paymentDate            },
               { label: "Контрагент", value: "ООО Поставщик Альфа" },
               { label: "Статья",     value: "Аренда офиса"        },
@@ -190,77 +229,20 @@ export function RequestDrawer({ onClose, isCashGap, deficitAmount, onReschedule,
           </div>
         </div>
 
-        {/* Action buttons */}
-        {!showReject && (
+        {/* Перенести дату — единственное действие вне маршрута согласования */}
+        {onReschedule && (
           <div style={{ display: "flex", gap: 8 }}>
-            {isPending && canApprove && (
-              <button onClick={handleApprove} style={{
-                flex: 1, padding: "9px 0", borderRadius: 8,
-                background: C.sage, color: C.surface, border: "none",
-                fontSize: 13, fontWeight: 500, cursor: "pointer", fontFamily: "Inter, sans-serif",
-              }}>Согласовать</button>
-            )}
-            {isPending && canApprove && (
-              <button onClick={() => setShowReject(true)} style={{
-                flex: 1, padding: "9px 0", borderRadius: 8,
-                background: "transparent", color: C.danger, border: `1.5px solid ${C.danger}`,
-                fontSize: 13, fontWeight: 500, cursor: "pointer", fontFamily: "Inter, sans-serif",
-              }}>Отклонить</button>
-            )}
-            {onReschedule && (
-              <button onClick={() => { setShowDatePick(v => !v); setNewDate(paymentDate); }} style={{
-                flex: 1, padding: "9px 0", borderRadius: 8,
-                background: showDatePick ? C.hdr : C.ivory,
-                color: C.textDk,
-                border: showDatePick ? `1.5px solid ${C.sage}` : `1.5px solid ${C.warm}`,
-                fontSize: 13, fontWeight: 500, cursor: "pointer", fontFamily: "Inter, sans-serif",
-                display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-              }}>
-                <Calendar size={13} />
-                Перенести дату
-              </button>
-            )}
-          </div>
-        )}
-
-        {/* Reject form */}
-        {showReject && (
-          <div style={{
-            background: C.danger08, border: `1.5px solid ${C.danger}`,
-            borderRadius: 10, padding: "14px 16px",
-            display: "flex", flexDirection: "column", gap: 10,
-          }}>
-            <div style={{ fontSize: 13, fontWeight: 600, color: C.danger }}>Причина отказа</div>
-            <textarea
-              autoFocus
-              placeholder="Укажите причину отклонения заявки…"
-              value={rejectReason}
-              onChange={e => setRejectReason(e.target.value)}
-              rows={3}
-              style={{
-                width: "100%", padding: "9px 12px",
-                border: `1px solid ${C.danger}`, borderRadius: 6,
-                background: C.surface, fontSize: 13, color: C.textDk,
-                outline: "none", resize: "none", fontFamily: "Inter, sans-serif", boxSizing: "border-box",
-              }}
-            />
-            <div style={{ display: "flex", gap: 8 }}>
-              <button onClick={handleRejectConfirm} disabled={!rejectReason.trim()} style={{
-                flex: 1, padding: "8px 0", borderRadius: 6,
-                background: rejectReason.trim() ? C.danger : C.ivory,
-                color: C.surface, border: "none", fontSize: 13, fontWeight: 500,
-                cursor: rejectReason.trim() ? "pointer" : "not-allowed", fontFamily: "Inter, sans-serif",
-                display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-              }}>
-                <Check size={13} />
-                Подтвердить отказ
-              </button>
-              <button onClick={() => { setShowReject(false); setRejectReason(""); }} style={{
-                padding: "8px 16px", borderRadius: 6, background: "transparent",
-                color: C.textLt, border: `1px solid ${C.warm}`,
-                fontSize: 13, cursor: "pointer", fontFamily: "Inter, sans-serif",
-              }}>Отмена</button>
-            </div>
+            <button onClick={() => { setShowDatePick(v => !v); setNewDate(paymentDate); }} style={{
+              flex: 1, padding: "9px 0", borderRadius: 8,
+              background: showDatePick ? C.hdr : C.ivory,
+              color: C.textDk,
+              border: showDatePick ? `1.5px solid ${C.sage}` : `1.5px solid ${C.warm}`,
+              fontSize: 13, fontWeight: 500, cursor: "pointer", fontFamily: "Inter, sans-serif",
+              display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+            }}>
+              <Calendar size={13} />
+              Перенести дату
+            </button>
           </div>
         )}
 
@@ -308,6 +290,41 @@ export function RequestDrawer({ onClose, isCashGap, deficitAmount, onReschedule,
             </div>
           </div>
         )}
+
+        {/* ── Маршрут согласования ── */}
+        <div style={{ background: C.ivory50, borderRadius: 10, padding: "14px 16px", border: `1px solid ${C.warm}` }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: C.textDk, marginBottom: 10, display: "flex", alignItems: "center", gap: 6 }}>
+            <span style={{ width: 16, height: 16, borderRadius: "50%", background: C.sage10, display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 10, color: C.sage }}>✓</span>
+            Маршрут согласования
+          </div>
+          <ApprovalStepper
+            stages={approvalStages}
+            route={approvalRoute}
+            currentRole={
+              user?.role === "manager"   ? "manager"   :
+              user?.role === "treasurer" ? "treasurer" :
+              user?.role === "admin"     ? "manager"   :  // admin can act on any stage
+              undefined
+            }
+            paymentId={paymentId}
+            onApprove={async (stageId, comment) => {
+              await api.approvals.approveStage(paymentId, stageId, comment);
+              const updated = await api.approvals.getApproval(paymentId);
+              const newStages = (updated as any)?.stages ?? [];
+              setApprovalStages(newStages);
+              onApprovalChanged?.(paymentId, newStages);
+              showToast("Этап согласован", "success");
+            }}
+            onReject={async (stageId, comment) => {
+              await api.approvals.rejectStage(paymentId, stageId, comment);
+              const updated = await api.approvals.getApproval(paymentId);
+              const newStages = (updated as any)?.stages ?? [];
+              setApprovalStages(newStages);
+              onApprovalChanged?.(paymentId, newStages);
+              showToast("Этап отклонён", "error");
+            }}
+          />
+        </div>
 
         {/* Tabs */}
         <div style={{ borderBottom: `1px solid ${C.warm}`, display: "flex" }}>

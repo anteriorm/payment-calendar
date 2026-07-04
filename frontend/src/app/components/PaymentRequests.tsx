@@ -1,25 +1,29 @@
-import { useState, useEffect } from "react";
-import { Search, ChevronDown, Edit2, Send, Trash2, FolderOpen, Upload, X, FileDown, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
+import { useState, useEffect, type ChangeEvent, type DragEvent, type ReactNode } from "react";
+import { Search, ChevronDown, Edit2, Send, Trash2, FolderOpen, Upload, X, FileDown, ArrowUpDown, ArrowUp, ArrowDown, RefreshCw, GitBranch } from "lucide-react";
 import { TableSkeleton, TableError } from "./TableSkeleton";
 import * as api from "../../api";
 import { C } from "../tokens";
 import { useToast } from "./Toast";
 import { CreateRequestModal, type ModalRequestData } from "./CreateRequestModal";
-import { exportCsv, rubToKopecks, kopecksToRub, formatRubFromRub } from "../utils";
+import { exportCsv, rubToKopecks, kopecksToRub, formatRubFromRub, getAccountCurrency, formatAmount } from "../utils";
+import { MiniStepper } from "./ApprovalStepper";
+import type { ApprovalStageInfo, ApprovalRoute } from "../../api";
 
 type Status   = "draft" | "pending" | "approved" | "inRegistry" | "paid" | "rejected";
 type Priority = "high" | "medium" | "low";
 
 interface Request {
-  id:           number;
-  counterparty: string;
-  article:      string;
-  purpose:      string;
-  amount:       number;
-  date:         string;
-  account:      string;
-  priority:     Priority;
-  status:       Status;
+  id:                   number;
+  approvalStages?:      ApprovalStageInfo[];
+  counterparty:         string;
+  article:              string;
+  purpose:              string;
+  amount:               number;
+  date:                 string;
+  account:              string;
+  priority:             Priority;
+  status:               Status;
+  recurringTemplateId?: number;
 }
 
 const STATUS_CFG: Record<Status, { bg: string; color: string; label: string }> = {
@@ -37,16 +41,10 @@ const PRIORITY_CFG: Record<Priority, { dot: string; label: string; border?: bool
   low:    { dot: C.sage,   label: "Низкий"                },
 };
 
-const INITIAL_ROWS: Request[] = [
-  { id: 2843, counterparty: "ООО ТехСервис",       article: "Услуги подрядчиков",  purpose: "Разработка ПО",             amount: 85000,  date: "20.06.2026", account: "Расчётный №2", priority: "medium", status: "draft"      },
-  { id: 2844, counterparty: "ИП Смирнов А.В.",     article: "Аренда",              purpose: "Аренда склада",             amount: 45000,  date: "22.06.2026", account: "Расчётный №1", priority: "high",   status: "pending"    },
-  { id: 2845, counterparty: "ООО РентаГрупп",      article: "Аренда офиса",        purpose: "Офис, июнь 2026",           amount: 120000, date: "25.06.2026", account: "Расчётный №1", priority: "low",    status: "approved"   },
-  { id: 2846, counterparty: "АО ТехСервис",        article: "Налоги и сборы",      purpose: "НДС за Q2",                 amount: 340000, date: "28.06.2026", account: "Расчётный №2", priority: "high",   status: "inRegistry" },
-  { id: 2847, counterparty: "ООО Поставщик Альфа", article: "Расходные материалы", purpose: "Канцелярия",                amount: 12500,  date: "18.06.2026", account: "Касса",        priority: "low",    status: "paid"       },
-  { id: 2848, counterparty: "ПАО Энергоресурс",    article: "Услуги подрядчиков",  purpose: "Управленческий консалтинг", amount: 95000,  date: "15.06.2026", account: "Расчётный №1", priority: "medium", status: "rejected"   },
-];
+// INITIAL_ROWS removed — data now comes from api.payments.getAll() merged with api.approvals.getAllApprovals()
 
-const COLS = "40px 56px 1fr 110px 130px 110px 88px 110px 88px 130px 90px";
+// #    №     Контрагент    Статья  Назначение  Сумма   Дата   Счёт    Приор  Статус  Действия
+const COLS = "40px 56px minmax(100px,1fr) 100px 100px 110px 82px 100px 82px 130px 124px";
 
 /** Семантический порядок сортировки — высокий приоритет первым */
 const PRIORITY_ORDER: Record<Priority, number> = { high: 0, medium: 1, low: 2 };
@@ -83,31 +81,41 @@ function toModalData(req: Request): ModalRequestData {
 
 interface PaymentRequestsProps {
   onCreateRequest?: () => void;
+  /** Открыть детали заявки (маршрут согласования) в RequestDrawer */
+  onOpenDetails?:   (paymentId: number) => void;
 }
 
 const PAGE_SIZE = 8;
 
 /** Преобразует ответ API (planned_date, account_name, item) в формат компонента */
-function mapApiToRequest(p: Record<string, unknown>): Request {
+const RECURRING_TEMPLATE_MAP: Record<number, number> = { 2844: 5, 2845: 1, 2847: 4 };
+
+function mapApiToRequest(
+  p: Record<string, unknown>,
+  approvalStages?: ApprovalStageInfo[],
+): Request {
   const rawDate = (p.planned_date ?? p.date ?? "") as string;
   const date = rawDate.includes(".")
-    ? rawDate                                        // уже в ДД.ММ.ГГГГ
-    : rawDate.split("-").reverse().join(".");         // ГГГГ-ММ-ДД → ДД.ММ.ГГГГ
+    ? rawDate
+    : rawDate.split("-").reverse().join(".");
   const rawStatus = (p.status ?? "draft") as string;
+  const id = p.id as number;
   return {
-    id:           p.id as number,
-    counterparty: (p.counterparty ?? "") as string,
-    article:      ((p.item ?? p.article) ?? "") as string,
-    purpose:      (p.purpose ?? "") as string,
-    amount:       kopecksToRub((p.amount ?? 0) as number),  // копейки → рубли
+    id,
+    counterparty:        (p.counterparty ?? "") as string,
+    article:             ((p.item ?? p.article) ?? "") as string,
+    purpose:             (p.purpose ?? "") as string,
+    amount:              kopecksToRub((p.amount ?? 0) as number),
     date,
-    account:      ((p.account_name ?? p.account) ?? "") as string,
-    priority:     ((p.priority) ?? "medium") as Priority,
-    status:       (rawStatus === "in_registry" ? "inRegistry" : rawStatus) as Status,
+    account:             ((p.account_name ?? p.account) ?? "") as string,
+    priority:            ((p.priority) ?? "medium") as Priority,
+    status:              (rawStatus === "in_registry" ? "inRegistry" : rawStatus) as Status,
+    approvalStages:      approvalStages && approvalStages.length > 0 ? approvalStages : undefined,
+    recurringTemplateId: (p.recurring_template_id as number | undefined) ?? RECURRING_TEMPLATE_MAP[id],
   };
 }
 
-export function PaymentRequests({ onCreateRequest }: PaymentRequestsProps) {
+export function PaymentRequests({ onCreateRequest, onOpenDetails, refreshKey = 0 }: PaymentRequestsProps) {
   const { showToast } = useToast();
 
   const [rows,          setRows]          = useState<Request[]>([]);
@@ -119,6 +127,9 @@ export function PaymentRequests({ onCreateRequest }: PaymentRequestsProps) {
   const [dateFrom,      setDateFrom]      = useState("");
   const [dateTo,        setDateTo]        = useState("");
   const [hovered,       setHovered]       = useState<number | null>(null);
+  const [routes,        setRoutes]        = useState<ApprovalRoute[]>([]);
+  const [sendPickerId,  setSendPickerId]  = useState<number | null>(null);
+  const [sendRouteId,   setSendRouteId]   = useState<number>(1);
   const [selected,      setSelected]      = useState<Set<number>>(new Set());
   const [activePage,    setActivePage]    = useState(1);
   const [sortKey,       setSortKey]       = useState<keyof Request | null>(null);
@@ -128,15 +139,33 @@ export function PaymentRequests({ onCreateRequest }: PaymentRequestsProps) {
   const [deleteRequest,   setDeleteRequest]   = useState<Request | null>(null);
   const [showImport,      setShowImport]      = useState(false);
 
-  // ── Load from API (STUB: replace with real backend when VITE_USE_MOCK=false) ──
+  // ── Load payments + live approval stages in parallel ──
   const loadData = () => {
     setLoading(true); setLoadError(null);
-    api.payments.getAll()
-      .then(data => setRows((data as unknown[]).map(p => mapApiToRequest(p as Record<string, unknown>))))
+    Promise.all([
+      api.payments.getAll(),
+      api.approvals.getAllApprovals(),
+    ])
+      .then(([payments, approvals]) => {
+        const approvalMap = new Map<number, ApprovalStageInfo[]>(
+          (approvals as { paymentId: number; stages: ApprovalStageInfo[] }[])
+            .map(a => [a.paymentId, a.stages])
+        );
+        setRows((payments as unknown[]).map(p => {
+          const pid = (p as Record<string, unknown>).id as number;
+          return mapApiToRequest(p as Record<string, unknown>, approvalMap.get(pid));
+        }));
+      })
       .catch(() => setLoadError("Не удалось загрузить заявки"))
       .finally(() => setLoading(false));
   };
-  useEffect(() => { loadData(); }, []);
+
+  useEffect(() => { loadData(); }, [refreshKey]);
+
+  // Load approval routes for the route picker
+  useEffect(() => {
+    api.approvals.getRoutes().then(r => setRoutes(r as ApprovalRoute[]));
+  }, []);
 
   // Reset page on filter change
   useEffect(() => { setActivePage(1); }, [search, statusF, accountF, dateFrom, dateTo]);
@@ -197,26 +226,61 @@ export function PaymentRequests({ onCreateRequest }: PaymentRequestsProps) {
       showToast("Заявка обновлена", "success");
       setEditRequest(null);
     } else {
+      const newId  = Math.max(0, ...rows.map(r => r.id)) + 1;
       const newReq: Request = {
-        id:           Math.max(0, ...rows.map(r => r.id)) + 1,
+        id:           newId,
         counterparty: data.counterparty ?? "",
         article:      data.article      ?? "",
         purpose:      data.purpose      ?? "",
-        amount:       kopecksToRub(rubToKopecks(data.amount ?? "0")),  // форма в рублях → kopecksToRub для хранения
+        amount:       kopecksToRub(rubToKopecks(data.amount ?? "0")),
         date:         data.date         ?? "26.06.2026",
         account:      data.account      ?? "",
         priority:     (data.priority as Priority) ?? "medium",
-        status:       "draft",
+        status:       asDraft ? "draft" : "pending",
       };
       setRows(prev => [newReq, ...prev]);
-      showToast(asDraft ? "Черновик сохранён" : "Заявка создана", "success");
       setShowCreateModal(false);
+      // Start approval route immediately if not draft and routeId selected
+      if (!asDraft && data.routeId) {
+        api.approvals.startRoute(newId, data.routeId)
+          .then(approval => {
+            const stages = ((approval as any)?.stages ?? []) as ApprovalStageInfo[];
+            if (stages.length > 0) {
+              setRows(prev => prev.map(r =>
+                r.id === newId ? { ...r, approvalStages: stages } : r
+              ));
+            }
+            const route = routes.find(rt => rt.id === data.routeId);
+            showToast(`Заявка отправлена. Маршрут: «${route?.name ?? "Стандартный"}»`, "success");
+          })
+          .catch(() => showToast("Заявка создана (ошибка запуска маршрута)", "warning"));
+      } else {
+        showToast(asDraft ? "Черновик сохранён" : "Заявка создана", "success");
+      }
     }
   };
 
   const handleSend = (id: number) => {
-    setRows(prev => prev.map(r => r.id === id ? { ...r, status: "pending" } : r));
-    showToast("Заявка отправлена на согласование", "success");
+    // Opens the route picker — user selects a route before actually sending
+    setSendRouteId(routes[0]?.id ?? 1);
+    setSendPickerId(id);
+  };
+
+  const handleSendConfirm = async (paymentId: number, routeId: number) => {
+    setSendPickerId(null);
+    try {
+      const approval = await api.approvals.startRoute(paymentId, routeId) as { stages: ApprovalStageInfo[] };
+      const stages = approval.stages ?? [];
+      setRows(prev => prev.map(r =>
+        r.id === paymentId
+          ? { ...r, status: "pending", approvalStages: stages.length > 0 ? stages : undefined }
+          : r
+      ));
+      const route = routes.find(r => r.id === routeId);
+      showToast(`Заявка отправлена. Маршрут: «${route?.name ?? "Стандартный"}»`, "success");
+    } catch {
+      showToast("Ошибка при отправке на согласование", "error");
+    }
   };
 
   const handleDeleteConfirm = () => {
@@ -362,9 +426,16 @@ export function PaymentRequests({ onCreateRequest }: PaymentRequestsProps) {
                     <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{req.purpose}</span>
                   </div>
                   <div style={{ padding: "10px 10px", display: "flex", alignItems: "center", fontSize: 13, fontWeight: 500, fontVariantNumeric: "tabular-nums", color: C.textDk, whiteSpace: "nowrap" }}>
-                    {formatRubFromRub(req.amount)}
+                    {formatAmount(req.amount, getAccountCurrency(req.account))}
                   </div>
-                  <div style={{ padding: "10px 10px", display: "flex", alignItems: "center", fontSize: 12, color: C.textLt, whiteSpace: "nowrap" }}>{req.date}</div>
+                  <div style={{ padding: "10px 10px", display: "flex", alignItems: "center", gap: 5, fontSize: 12, color: C.textLt, whiteSpace: "nowrap" }}>
+                    {req.recurringTemplateId && (
+                      <span title={`Повторяющийся платёж (шаблон #${req.recurringTemplateId})`} style={{ display: "inline-flex", color: "#3D6B3D", flexShrink: 0 }}>
+                        <RefreshCw size={11} />
+                      </span>
+                    )}
+                    {req.date}
+                  </div>
                   <div style={{ padding: "10px 10px", display: "flex", alignItems: "center", fontSize: 12, color: C.textLt, overflow: "hidden" }}>
                     <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{req.account}</span>
                   </div>
@@ -372,12 +443,20 @@ export function PaymentRequests({ onCreateRequest }: PaymentRequestsProps) {
                     <span style={{ width: 8, height: 8, borderRadius: "50%", background: pc.dot, flexShrink: 0, border: pc.border ? "1px solid #C0A070" : undefined }} />
                     <span style={{ fontSize: 12, color: C.textLt, whiteSpace: "nowrap" }}>{pc.label}</span>
                   </div>
-                  <div style={{ padding: "10px 10px", display: "flex", alignItems: "center" }}>
+                  <div style={{ padding: "10px 10px", display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 2 }}>
                     <span style={{ display: "inline-flex", alignItems: "center", padding: "3px 8px", borderRadius: 4, fontSize: 11, fontWeight: 500, background: sc.bg, color: sc.color, whiteSpace: "nowrap" }}>
                       {sc.label}
                     </span>
+                    {req.approvalStages && req.approvalStages.length > 0 && (
+                      <MiniStepper stages={req.approvalStages} />
+                    )}
                   </div>
                   <div style={{ padding: "10px 8px", display: "flex", alignItems: "center", gap: 4 }}>
+                    {onOpenDetails && req.approvalStages && req.approvalStages.length > 0 && (
+                      <IconBtn title="Маршрут согласования" hoverColor={C.sage} onClick={() => onOpenDetails(req.id)}>
+                        <GitBranch size={14} />
+                      </IconBtn>
+                    )}
                     <IconBtn title="Редактировать" hoverColor={C.sage} onClick={() => setEditRequest(req)}>
                       <Edit2 size={14} />
                     </IconBtn>
@@ -493,6 +572,73 @@ export function PaymentRequests({ onCreateRequest }: PaymentRequestsProps) {
           }}
         />
       )}
+
+      {/* ── Route picker modal (shown when clicking Send) ── */}
+      {sendPickerId !== null && (
+        <div
+          onClick={() => setSendPickerId(null)}
+          style={{ position: "fixed", inset: 0, background: "rgba(44,44,30,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1100, fontFamily: "Inter, sans-serif" }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{ width: 460, background: C.surface, border: `1px solid ${C.warm}`, borderRadius: 12, boxShadow: "0 4px 24px rgba(44,44,30,0.18)", overflow: "hidden" }}
+          >
+            <div style={{ padding: "18px 22px 14px", borderBottom: `1px solid ${C.warm}` }}>
+              <div style={{ fontSize: 16, fontWeight: 600, color: C.textDk }}>
+                Выбор маршрута согласования
+              </div>
+              <div style={{ fontSize: 12, color: C.textLt, marginTop: 4 }}>
+                Заявка № {sendPickerId}
+              </div>
+            </div>
+            <div style={{ padding: "14px 22px", display: "flex", flexDirection: "column", gap: 8 }}>
+              {routes.map(r => {
+                const sel = sendRouteId === r.id;
+                return (
+                  <button
+                    key={r.id}
+                    onClick={() => setSendRouteId(r.id)}
+                    style={{
+                      padding: "12px 14px", borderRadius: 8, textAlign: "left",
+                      border: sel ? `2px solid ${C.sage}` : `1px solid ${C.warm}`,
+                      background: sel ? C.sage10 : C.surface,
+                      cursor: "pointer", fontFamily: "Inter, sans-serif",
+                    }}
+                  >
+                    <div style={{ fontSize: 13, fontWeight: 600, color: sel ? "#3D6B3D" : C.textDk }}>
+                      {r.name}
+                    </div>
+                    <div style={{ fontSize: 12, color: C.textLt, marginTop: 2 }}>
+                      {r.description}
+                    </div>
+                    <div style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap" }}>
+                      {r.stageTemplates.map((st, i) => (
+                        <span key={i} style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, padding: "2px 8px", borderRadius: 10, background: sel ? "rgba(100,140,100,0.15)" : C.ivory, color: sel ? "#3D6B3D" : C.textLt }}>
+                          {i + 1}. {st.stageName}
+                        </span>
+                      ))}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+            <div style={{ padding: "12px 22px 18px", display: "flex", gap: 10 }}>
+              <button
+                onClick={() => handleSendConfirm(sendPickerId, sendRouteId)}
+                style={{ flex: 1, padding: "10px 0", borderRadius: 8, background: C.sage, color: C.surface, border: "none", fontSize: 14, fontWeight: 500, cursor: "pointer", fontFamily: "Inter, sans-serif", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
+              >
+                Отправить на согласование
+              </button>
+              <button
+                onClick={() => setSendPickerId(null)}
+                style={{ padding: "10px 16px", borderRadius: 8, background: "transparent", color: C.olive, border: `1.5px solid ${C.warm}`, fontSize: 14, cursor: "pointer", fontFamily: "Inter, sans-serif" }}
+              >
+                Отмена
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }
@@ -531,7 +677,7 @@ function CheckBox({ checked, onChange }: { checked: boolean; onChange: () => voi
 }
 
 function IconBtn({ children, title, hoverColor, onClick }: {
-  children: React.ReactNode; title: string; hoverColor: string; onClick?: () => void;
+  children: ReactNode; title: string; hoverColor: string; onClick?: () => void;
 }) {
   const [hov, setHov] = useState(false);
   return (
@@ -671,13 +817,13 @@ function ImportModal({ onClose, onImport }: ImportModalProps) {
     reader.readAsText(f, "UTF-8");
   };
 
-  const handleDrop = (e: React.DragEvent) => {
+  const handleDrop = (e: DragEvent) => {
     e.preventDefault(); setDragOver(false);
     const f = e.dataTransfer.files[0];
     if (f) readFile(f);
   };
 
-  const handleInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleInput = (e: ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
     if (f) readFile(f);
   };

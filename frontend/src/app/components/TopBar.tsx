@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, type ComponentType } from "react";
 import { Bell, User, Settings, LogOut, AlertTriangle, CheckCircle, Mail, Palette } from "lucide-react";
 import { C, THEMES, applyTheme, currentTheme, type ThemeKey } from "../tokens";
 import { useAuth, ROLE_LABELS } from "../context/AuthContext";
@@ -199,7 +199,7 @@ export function TopBar({ title, onOpenProfile, onOpenSettings }: TopBarProps) {
  * ──────────────────────────────────────────────────────── */
 interface NotifEntry {
   id: number; type: "danger" | "success" | "info";
-  icon: React.ComponentType<{ size: number; color?: string }>;
+  icon: ComponentType<{ size: number; color?: string }>;
   text: string; time: string; read: boolean;
 }
 interface TypeColor { icon: string; bg: string; }

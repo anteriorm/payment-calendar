@@ -6,7 +6,7 @@
  * Фильтры → query params → GET /api/audit?user_id=&action=&from=&to=
  */
 
-import { useState } from "react";
+import { useState, type CSSProperties } from "react";
 import { Search, ChevronDown, Download } from "lucide-react";
 import { C } from "../tokens";
 import { exportCsv } from "../utils";
@@ -108,7 +108,7 @@ export function AuditScreen() {
     showToast("Аудит_действий.csv скачан", "success");
   };
 
-  const selStyle: React.CSSProperties = {
+  const selStyle: CSSProperties = {
     padding: "7px 26px 7px 10px",
     border: `1px solid ${C.warm}`,
     borderRadius: 6,

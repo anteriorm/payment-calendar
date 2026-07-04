@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type FormEvent } from "react";
 import { Eye, EyeOff } from "lucide-react";
 import { C } from "../tokens";
 import { useAuth, DEMO_USERS, ROLE_LABELS, type AuthUser } from "../context/AuthContext";
@@ -20,7 +20,7 @@ export function LoginScreen() {
   const [error,    setError]    = useState("");
   const [loading,  setLoading]  = useState(false);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     // Клиентская валидация перед запросом
     const validationError = firstError(

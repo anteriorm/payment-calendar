@@ -1,23 +1,27 @@
-import { useState } from "react";
-import { Pencil, Trash2, Plus, X } from "lucide-react";
+import { useState, useEffect, type CSSProperties, type ReactNode } from "react";
+import { Pencil, Trash2, Plus, X, RefreshCw } from "lucide-react";
 import { C } from "../tokens";
 import { useToast } from "./Toast";
 import { required, nonNegative, inn as validateInn, loginFormat, firstError } from "../utils/validation";
+import * as api from "../../api";
+import type { Currency } from "../../api";
+import { CURRENCY_SYMBOLS, registerAccountCurrency } from "../utils";
 
-type TabId = "accounts" | "counterparties" | "articles" | "users";
+type TabId = "accounts" | "counterparties" | "articles" | "users" | "currencies";
 
 const TABS: { id: TabId; label: string }[] = [
   { id: "accounts",       label: "Счета и кассы"   },
   { id: "counterparties", label: "Контрагенты"      },
   { id: "articles",       label: "Статьи движения"  },
   { id: "users",          label: "Пользователи"     },
+  { id: "currencies",     label: "Валюты"           },
 ];
 
 interface Account { id: number; name: string; currency: string; opening: number; current: number; }
 
 const INITIAL_ACCOUNTS: Account[] = [
   { id: 1, name: "Расчётный счёт №1", currency: "RUB", opening: 500000, current: 980000 },
-  { id: 2, name: "Расчётный счёт №2", currency: "RUB", opening: 200000, current: 45000  },
+  { id: 2, name: "Расчётный счёт №2", currency: "USD", opening: 22000,  current: 4500   },
   { id: 3, name: "Касса",             currency: "RUB", opening: 50000,  current: 12500  },
 ];
 
@@ -98,6 +102,7 @@ export function References({ canManage = true }: { canManage?: boolean }) {
         {tab === "counterparties" && <CounterpartiesTab canManage={canManage} />}
         {tab === "articles"       && <ArticlesTab canManage={canManage} />}
         {tab === "users"          && <UsersTab canManage={canManage} />}
+        {tab === "currencies"     && <CurrenciesTab canManage={canManage} />}
       </div>
     </div>
   );
@@ -116,6 +121,7 @@ function AccountsTab({ canManage = true }: { canManage?: boolean }) {
   const openDel  = (acc: Account) => setDelTarget(acc);
 
   const handleSave = (data: { name: string; currency: string; opening: number }) => {
+    registerAccountCurrency(data.name, data.currency);
     if (editTarget) {
       setAccounts(prev => prev.map(a => a.id === editTarget.id ? { ...a, ...data } : a));
       showToast("Счёт успешно обновлён", "success");
@@ -218,12 +224,12 @@ function AccountModal({ initial, onSave, onClose }: AccountModalProps) {
   const [opening,  setOpening]  = useState(initial ? String(initial.opening) : "");
   const [focused,  setFocused]  = useState<string | null>(null);
 
-  const focusStyle = (f: string): React.CSSProperties =>
+  const focusStyle = (f: string): CSSProperties =>
     focused === f
       ? { border: `1.5px solid ${C.sage}`, boxShadow: `0 0 0 3px ${C.sage20}` }
       : { border: `1px solid ${C.warm}` };
 
-  const base: React.CSSProperties = {
+  const base: CSSProperties = {
     width: "100%",
     padding: "9px 12px",
     borderRadius: 6,
@@ -281,7 +287,7 @@ function AccountModal({ initial, onSave, onClose }: AccountModalProps) {
           <div>
             <FieldLabel>Валюта</FieldLabel>
             <div style={{ display: "flex", gap: 8 }}>
-              {["RUB", "USD", "EUR"].map(cur => (
+              {["RUB", "USD", "EUR", "CNY"].map(cur => (
                 <button
                   key={cur}
                   onClick={() => setCurrency(cur)}
@@ -417,7 +423,7 @@ function CpModal({ initial, onSave, onClose }: { initial: Counterparty | null; o
   const [ctc,  setCtc]  = useState(initial?.contact ?? "");
   const [errors, setErrors] = useState<Record<string,string>>({});
 
-  const inp: React.CSSProperties = { width: "100%", padding: "9px 12px", borderRadius: 6, background: C.surface, border: `1px solid ${C.warm}`, fontSize: 14, color: C.textDk, outline: "none", fontFamily: "Inter, sans-serif", boxSizing: "border-box" };
+  const inp: CSSProperties = { width: "100%", padding: "9px 12px", borderRadius: 6, background: C.surface, border: `1px solid ${C.warm}`, fontSize: 14, color: C.textDk, outline: "none", fontFamily: "Inter, sans-serif", boxSizing: "border-box" };
   const errBorder = { border: `1.5px solid ${C.danger}` };
 
   const handleSave = () => {
@@ -512,7 +518,7 @@ function ArticlesTab({ canManage = true }: { canManage?: boolean }) {
 function ArtModal({ initial, onSave, onClose }: { initial: Article | null; onSave: (r: Article) => void; onClose: () => void }) {
   const [code, setCode] = useState(initial?.code ?? ""); const [name, setName] = useState(initial?.name ?? "");
   const [type, setType] = useState(initial?.type ?? "Расход"); const [group, setGroup] = useState(initial?.group ?? "");
-  const inp: React.CSSProperties = { width: "100%", padding: "9px 12px", borderRadius: 6, background: C.surface, border: `1px solid ${C.warm}`, fontSize: 14, color: C.textDk, outline: "none", fontFamily: "Inter, sans-serif", boxSizing: "border-box" };
+  const inp: CSSProperties = { width: "100%", padding: "9px 12px", borderRadius: 6, background: C.surface, border: `1px solid ${C.warm}`, fontSize: 14, color: C.textDk, outline: "none", fontFamily: "Inter, sans-serif", boxSizing: "border-box" };
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: C.overlay, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, fontFamily: "Inter, sans-serif" }}>
       <div onClick={e => e.stopPropagation()} style={{ width: 480, background: C.surface, border: `1px solid ${C.warm}`, borderRadius: 12, boxShadow: "0 4px 24px rgba(44,44,30,0.18)" }}>
@@ -601,7 +607,7 @@ function UserModal({ initial, onSave, onClose }: { initial: AppUser | null; onSa
   const [login,  setLogin]  = useState(initial?.login  ?? "");
   const [role,   setRole]   = useState(initial?.role   ?? "Инициатор");
   const [status, setStatus] = useState(initial?.status ?? "active");
-  const inp: React.CSSProperties = { width: "100%", padding: "9px 12px", borderRadius: 6, background: C.surface, border: `1px solid ${C.warm}`, fontSize: 14, color: C.textDk, outline: "none", fontFamily: "Inter, sans-serif", boxSizing: "border-box" };
+  const inp: CSSProperties = { width: "100%", padding: "9px 12px", borderRadius: 6, background: C.surface, border: `1px solid ${C.warm}`, fontSize: 14, color: C.textDk, outline: "none", fontFamily: "Inter, sans-serif", boxSizing: "border-box" };
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: C.overlay, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, fontFamily: "Inter, sans-serif" }}>
       <div onClick={e => e.stopPropagation()} style={{ width: 480, background: C.surface, border: `1px solid ${C.warm}`, borderRadius: 12, boxShadow: "0 4px 24px rgba(44,44,30,0.18)" }}>
@@ -639,8 +645,114 @@ function UserModal({ initial, onSave, onClose }: { initial: AppUser | null; onSa
   );
 }
 
+/* ── Валюты ────────────────────────────────────────── */
+function CurrenciesTab({ canManage = true }: { canManage?: boolean }) {
+  const { showToast } = useToast();
+  const [currencies, setCurrencies] = useState<Currency[]>([]);
+  const [loading,    setLoading]    = useState(true);
+  const [editCode,   setEditCode]   = useState<string | null>(null);
+  const [rateInput,  setRateInput]  = useState("");
+
+  useEffect(() => {
+    api.currencies.getAll().then(data => { setCurrencies(data as Currency[]); setLoading(false); });
+  }, []);
+
+  const openEdit = (c: Currency) => {
+    setEditCode(c.code);
+    setRateInput(String(c.rate_to_rub));
+  };
+
+  const handleSaveRate = async (code: string) => {
+    const n = parseFloat(rateInput.replace(",", "."));
+    if (isNaN(n) || n <= 0) { showToast("Введите корректный курс", "error"); return; }
+    await api.currencies.updateRate(code, n);
+    setCurrencies(cs => cs.map(c => c.code === code ? { ...c, rate_to_rub: n, updated_at: "02.07.2026" } : c));
+    setEditCode(null);
+    showToast(`Курс ${code} обновлён`, "success");
+  };
+
+  return (
+    <>
+      <div style={{ padding: "12px 16px", borderBottom: `1px solid ${C.warm}`, display: "flex", alignItems: "center", gap: 12 }}>
+        <span style={{ fontSize: 13, color: C.textLt }}>
+          Курсы обновляются вручную. При подключении бэкенда — автоматически через ЦБ РФ.
+        </span>
+        <button onClick={() => { setLoading(true); api.currencies.getAll().then(d => { setCurrencies(d as Currency[]); setLoading(false); showToast("Курсы обновлены", "success"); }); }}
+          style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 5, padding: "6px 12px", borderRadius: 6, background: C.ivory, border: `1px solid ${C.warm}`, fontSize: 12, color: C.textLt, cursor: "pointer", fontFamily: "Inter, sans-serif" }}>
+          <RefreshCw size={12} />
+          Обновить
+        </button>
+      </div>
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+        <thead>
+          <tr style={{ background: C.hdr }}>
+            {["Код", "Символ", "Название", "Курс к ₽ (1 ед. = N ₽)", "Обновлено", "Действия"].map(col => (
+              <Th key={col}>{col}</Th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {loading ? (
+            <tr><td colSpan={6} style={{ padding: 24, textAlign: "center", color: C.textLt, fontSize: 13 }}>Загрузка…</td></tr>
+          ) : currencies.map((cur, i) => (
+            <Tr key={cur.code} i={i}>
+              <Td bold>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                  <span style={{ padding: "2px 7px", borderRadius: 4, fontSize: 11, fontWeight: 700, background: cur.code === "RUB" ? C.sage10 : cur.code === "USD" ? "rgba(45,120,200,0.12)" : cur.code === "EUR" ? "rgba(60,100,200,0.10)" : C.beige30, color: cur.code === "RUB" ? "#3D6B3D" : cur.code === "USD" ? "#1A5DA0" : cur.code === "EUR" ? "#2040A0" : "#7A5A30" }}>
+                    {cur.code}
+                  </span>
+                </span>
+              </Td>
+              <Td mono><span style={{ fontSize: 18, color: C.textDk }}>{cur.symbol}</span></Td>
+              <Td>{cur.name}</Td>
+              <Td mono>
+                {editCode === cur.code ? (
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <input autoFocus value={rateInput} onChange={e => setRateInput(e.target.value)}
+                      style={{ width: 90, padding: "5px 8px", borderRadius: 5, border: `1.5px solid ${C.sage}`, background: C.surface, fontSize: 13, color: C.textDk, outline: "none", fontFamily: "Inter, sans-serif" }} />
+                    <button onClick={() => handleSaveRate(cur.code)}
+                      style={{ padding: "5px 10px", borderRadius: 5, background: C.sage, color: C.surface, border: "none", fontSize: 12, cursor: "pointer", fontFamily: "Inter, sans-serif" }}>
+                      OK
+                    </button>
+                    <button onClick={() => setEditCode(null)}
+                      style={{ padding: "5px 8px", borderRadius: 5, background: "transparent", color: C.textLt, border: `1px solid ${C.warm}`, fontSize: 12, cursor: "pointer", fontFamily: "Inter, sans-serif" }}>
+                      ✕
+                    </button>
+                  </div>
+                ) : (
+                  <span style={{ color: cur.code === "RUB" ? C.textLt : C.textDk }}>
+                    {cur.code === "RUB" ? "1,00 (базовая)" : `${cur.rate_to_rub.toFixed(2)} ₽`}
+                  </span>
+                )}
+              </Td>
+              <Td color={C.textLt}>{cur.updated_at}</Td>
+              <Td>
+                {canManage && cur.code !== "RUB" ? (
+                  <IconBtn title="Изменить курс" hoverColor={C.sage} onClick={() => openEdit(cur)}>
+                    <Pencil size={14} />
+                  </IconBtn>
+                ) : (
+                  <span style={{ fontSize: 12, color: C.textLt }}>—</span>
+                )}
+              </Td>
+            </Tr>
+          ))}
+        </tbody>
+      </table>
+      {/* Пояснение о конвертации */}
+      <div style={{ padding: "12px 16px", borderTop: `1px solid ${C.warm}`, fontSize: 12, color: C.textLt, display: "flex", gap: 24 }}>
+        {currencies.filter(c => c.code !== "RUB").map(c => (
+          <span key={c.code}>
+            {c.symbol} 1 = {c.rate_to_rub.toFixed(2)} ₽
+          </span>
+        ))}
+      </div>
+    </>
+  );
+}
+
 /* ── Shared primitives ─────────────────────────────── */
-function TableToolbar({ children }: { children: React.ReactNode }) {
+function TableToolbar({ children }: { children: ReactNode }) {
   return (
     <div style={{ padding: "12px 16px", borderBottom: `1px solid ${C.warm}`, display: "flex", justifyContent: "flex-end" }}>
       {children}
@@ -657,11 +769,11 @@ function AddBtn({ label }: { label: string }) {
   );
 }
 
-function Th({ children }: { children: React.ReactNode }) {
+function Th({ children }: { children: ReactNode }) {
   return <th style={{ padding: "10px 14px", textAlign: "left", fontWeight: 600, color: C.textDk, fontSize: 12, whiteSpace: "nowrap" }}>{children}</th>;
 }
 
-function Tr({ children, i }: { children: React.ReactNode; i: number }) {
+function Tr({ children, i }: { children: ReactNode; i: number }) {
   const [hov, setHov] = useState(false);
   return (
     <tr onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}
@@ -671,7 +783,7 @@ function Tr({ children, i }: { children: React.ReactNode; i: number }) {
   );
 }
 
-function Td({ children, bold, mono, color }: { children?: React.ReactNode; bold?: boolean; mono?: boolean; color?: string }) {
+function Td({ children, bold, mono, color }: { children?: ReactNode; bold?: boolean; mono?: boolean; color?: string }) {
   return <td style={{ padding: "11px 14px", color: color ?? C.textDk, fontWeight: bold ? 600 : 400, fontVariantNumeric: mono ? "tabular-nums" : undefined, whiteSpace: "nowrap" }}>{children}</td>;
 }
 
@@ -683,11 +795,11 @@ function InactiveBadge() {
   return <span style={{ display: "inline-flex", padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 500, background: C.ivory, color: C.textLt }}>Неактивен</span>;
 }
 
-function FieldLabel({ children }: { children: React.ReactNode }) {
+function FieldLabel({ children }: { children: ReactNode }) {
   return <label style={{ fontSize: 12, fontWeight: 500, color: C.textLt, display: "block", marginBottom: 6 }}>{children}</label>;
 }
 
-function IconBtn({ children, title, hoverColor, onClick }: { children: React.ReactNode; title: string; hoverColor: string; onClick: () => void }) {
+function IconBtn({ children, title, hoverColor, onClick }: { children: ReactNode; title: string; hoverColor: string; onClick: () => void }) {
   const [hov, setHov] = useState(false);
   return (
     <button title={title} onClick={onClick} onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}

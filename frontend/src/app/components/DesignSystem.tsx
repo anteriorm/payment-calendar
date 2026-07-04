@@ -1,3 +1,4 @@
+import { type ReactNode } from "react";
 export function DesignSystem() {
   return (
     <div className="min-h-screen p-10" style={{ background: "#E0E0C0", fontFamily: "Inter, sans-serif" }}>
@@ -215,7 +216,7 @@ export function DesignSystem() {
 
 /* ── Вспомогательные компоненты ──────────────────────── */
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
     <div className="mb-10">
       <h2

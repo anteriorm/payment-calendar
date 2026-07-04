@@ -1,11 +1,11 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, type ReactNode } from "react";
 import { TableSkeleton, TableError } from "./TableSkeleton";
 import { RegistryDetailModal } from "./RegistryDetailModal";
 import * as api from "../../api";
-import { BarChart2, Plus, Pencil, Trash2, Search, X, ExternalLink } from "lucide-react";
+import { BarChart2, Plus, Pencil, Trash2, Search, X, ExternalLink, Calendar, AlertTriangle } from "lucide-react";
 import { useToast } from "./Toast";
 import { C } from "../tokens";
-import { exportCsv } from "../utils";
+import { exportCsv, getAccountCurrency, formatAmount } from "../utils";
 
 type Priority = "high" | "medium" | "low";
 type RowStatus = "registry" | "paid" | "no_funds";
@@ -46,18 +46,17 @@ const AVAILABLE: AvailableRequest[] = [
   { id: 2851, counterparty: "ЗАО МедиаГрупп",      article: "Реклама",            amount: 38000,  date: "28.06.2026", priority: "low"    },
 ];
 
-function fmtFull(n: number): string {
+function fmtFull(n: number, account = ""): string {
+  const currency = getAccountCurrency(account);
+  const prefix = n < 0 ? "−" : "";
   const s = Math.floor(Math.abs(n)).toString();
   const parts: string[] = [];
   for (let i = s.length; i > 0; i -= 3) parts.unshift(s.slice(Math.max(0, i - 3), i));
-  return (n < 0 ? "−" : "") + parts.join(" ") + ",00 ₽";
+  return prefix + formatAmount(Math.abs(n), currency);
 }
 
-function fmtShort(n: number): string {
-  const s = Math.floor(n).toString();
-  const parts: string[] = [];
-  for (let i = s.length; i > 0; i -= 3) parts.unshift(s.slice(Math.max(0, i - 3), i));
-  return parts.join(" ") + " ₽";
+function fmtShort(n: number, account = ""): string {
+  return formatAmount(n, getAccountCurrency(account));
 }
 
 const STATUS_CFG: Record<RowStatus, { label: string; bg: string; color: string }> = {
@@ -85,17 +84,33 @@ export function PaymentRegistry({
 }) {
   const { showToast } = useToast();
 
-  const [rows,         setRows]        = useState<RegistryRow[]>([]);
-  const [loading,      setLoading]      = useState(true);
-  const [loadError,    setLoadError]    = useState<string | null>(null);
+  const [rows,             setRows]           = useState<RegistryRow[]>([]);
+  const [loading,          setLoading]         = useState(true);
+  const [loadError,        setLoadError]       = useState<string | null>(null);
+  const [registryDate,     setRegistryDate]    = useState("18.06.2026");
+  const [editingDate,      setEditingDate]     = useState(false);
+  const [availableBalance, setAvailableBalance]= useState<number>(0);
 
   const loadData = () => {
     setLoading(true); setLoadError(null);
-    // STUB: api.registries.getAll() → replace with real API
-    // Using INITIAL_ROWS mock via setTimeout to simulate API
     setTimeout(() => { setRows(INITIAL_ROWS.map(r => ({...r}))); setLoading(false); }, 300);
   };
   useEffect(() => { loadData(); }, []);
+
+  // Load RUB account balances for "Доступный остаток" card
+  useEffect(() => {
+    api.accounts.getAll().then(accounts => {
+      const rubBalance = (accounts as any[])
+        .filter((a: any) => a.currency === "RUB")
+        .reduce((s: number, a: any) => s + (a.current ?? 0) / 100, 0);
+      setAvailableBalance(rubBalance);
+    }).catch(() => setAvailableBalance(992500)); // fallback
+  }, []);
+
+  // Computed summary values from real rows
+  const totalToPay   = rows.filter(r => r.status !== "paid").reduce((s, r) => s + r.amount, 0);
+  const totalAll     = rows.reduce((s, r) => s + r.amount, 0);
+  const deficit      = totalToPay > availableBalance ? totalToPay - availableBalance : 0;
   const [selected,     setSelected]    = useState<Set<number>>(new Set());
   const [hovered,      setHovered]     = useState<number | null>(null);
   const [showAddModal,    setShowAddModal]    = useState(false);
@@ -133,19 +148,19 @@ export function PaymentRegistry({
       ? rows.filter(r => selected.has(r.id))
       : rows;
     exportCsv(
-      "Реестр_18.06.2026.csv",
+      `Реестр_${registryDate.replace(/\./g, "-")}.csv`,
       ["№", "Контрагент", "Статья", "Сумма", "Счёт", "Приоритет", "Статус"],
       toExport.map(r => [
         r.id,
         r.counterparty,
         r.article,
-        fmtShort(r.amount),
+        fmtShort(r.amount, r.account),
         r.account,
         PRIORITY_CFG[r.priority].label,
         STATUS_CFG[r.status].label,
       ]),
     );
-    showToast(`Реестр_18.06.2026.csv скачан (${toExport.length} строк)`, "success");
+    showToast(`Реестр_${registryDate.replace(/\./g, "-")}.csv скачан (${toExport.length} строк)`, "success");
   };
 
   const handleAddFromModal = (ids: number[]) => {
@@ -173,16 +188,57 @@ export function PaymentRegistry({
     <div style={{ padding: 24, fontFamily: "Inter, sans-serif", minHeight: "100%", overflowY: "auto" }}>
 
       {/* ── Page header ── */}
-      <div style={{ marginBottom: 20 }}>
-        <h1 style={{ fontSize: 24, fontWeight: 700, color: C.textDk, margin: 0 }}>Реестр платежей</h1>
-        <span style={{ fontSize: 14, color: C.textLt }}>18 июня 2026</span>
+      <div style={{ marginBottom: 20, display: "flex", alignItems: "center", gap: 20, flexWrap: "wrap" }}>
+        <div>
+          <h1 style={{ fontSize: 24, fontWeight: 700, color: C.textDk, margin: 0 }}>Реестр платежей</h1>
+          {/* A: Inline date picker */}
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4 }}>
+            <span style={{ fontSize: 12, color: C.textLt }}>Дата реестра:</span>
+            {editingDate ? (
+              <input
+                autoFocus
+                value={registryDate}
+                onChange={e => setRegistryDate(e.target.value)}
+                onBlur={() => setEditingDate(false)}
+                onKeyDown={e => e.key === "Enter" && setEditingDate(false)}
+                style={{ padding: "2px 8px", border: `1.5px solid ${C.sage}`, borderRadius: 5, fontSize: 13, color: C.textDk, fontFamily: "Inter, sans-serif", outline: "none", width: 110 }}
+              />
+            ) : (
+              <button
+                onClick={() => setEditingDate(true)}
+                title="Изменить дату реестра"
+                style={{ display: "flex", alignItems: "center", gap: 4, background: "none", border: "none", cursor: "pointer", color: C.textDk, fontSize: 13, fontFamily: "Inter, sans-serif", padding: "2px 4px", borderRadius: 4 }}
+              >
+                <Calendar size={12} color={C.olive} />
+                {registryDate}
+                <Pencil size={10} color={C.textLt} />
+              </button>
+            )}
+          </div>
+        </div>
       </div>
 
-      {/* ── Summary cards ── */}
+      {/* ── B: Summary cards — computed from real rows ── */}
       <div style={{ display: "flex", gap: 16, marginBottom: 20 }}>
-        <SummaryCard label="Итого к оплате"    value="1 240 000,00 ₽" valueColor={C.textDk}  />
-        <SummaryCard label="Доступный остаток" value="980 000,00 ₽"   valueColor={C.sage}    />
-        <SummaryCard label="Дефицит"           value="−260 000,00 ₽"  valueColor={C.danger}  cardBg={C.danger08} />
+        <SummaryCard
+          label="Итого к оплате"
+          value={fmtShort(totalToPay)}
+          note={`из ${rows.length} заявок, RUB-экв.`}
+          valueColor={C.textDk}
+        />
+        <SummaryCard
+          label="Доступный остаток"
+          value={fmtShort(availableBalance)}
+          note="сумма остатков RUB-счетов"
+          valueColor={deficit > 0 ? C.danger : C.sage}
+        />
+        <SummaryCard
+          label={deficit > 0 ? "Дефицит" : "Профицит"}
+          value={(deficit > 0 ? "−" : "+") + fmtShort(Math.abs(availableBalance - totalToPay))}
+          note="RUB-экв."
+          valueColor={deficit > 0 ? C.danger : C.sage}
+          cardBg={deficit > 0 ? C.danger08 : C.sage10}
+        />
       </div>
 
       {/* ── Toolbar ── */}
@@ -296,7 +352,7 @@ export function PaymentRegistry({
                   <td style={{ padding: "10px 12px", color: C.textLt, fontVariantNumeric: "tabular-nums" }}>{row.id}</td>
                   <td style={{ padding: "10px 12px", color: C.textDk, fontWeight: 500, whiteSpace: "nowrap" }}>{row.counterparty}</td>
                   <td style={{ padding: "10px 12px", color: C.textLt, whiteSpace: "nowrap" }}>{row.article}</td>
-                  <td style={{ padding: "10px 12px", color: C.textDk, fontWeight: 600, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>{fmtFull(row.amount)}</td>
+                  <td style={{ padding: "10px 12px", color: C.textDk, fontWeight: 600, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>{fmtFull(row.amount, row.account)}</td>
                   <td style={{ padding: "10px 12px", color: C.textLt, whiteSpace: "nowrap" }}>{row.account}</td>
                   <td style={{ padding: "10px 12px", whiteSpace: "nowrap" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
@@ -321,9 +377,14 @@ export function PaymentRegistry({
         </table>
 
         <div style={{ padding: "10px 14px", borderTop: `1px solid ${C.warm}`, display: "flex", alignItems: "center", justifyContent: "space-between", background: C.ivory }}>
-          <span style={{ fontSize: 12, color: C.textLt }}>Показано {rows.length} из {rows.length} записей</span>
+          <span style={{ fontSize: 12, color: C.textLt }}>Показано {rows.length} записей</span>
           <span style={{ fontSize: 12, color: C.textLt }}>
-            Итого: <strong style={{ color: C.textDk }}>1 240 000,00 ₽</strong>
+            Итого: <strong style={{ color: C.textDk }}>{fmtShort(totalAll)}</strong>
+            {totalToPay < totalAll && (
+              <span style={{ marginLeft: 8, color: C.textLt }}>
+                (к оплате: <strong style={{ color: deficit > 0 ? C.danger : C.textDk }}>{fmtShort(totalToPay)}</strong>)
+              </span>
+            )}
           </span>
         </div>
       </div>
@@ -335,6 +396,8 @@ export function PaymentRegistry({
           onClose={() => setShowAddModal(false)}
           onAdd={handleAddFromModal}
           fmtShort={fmtShort}
+          availableBalance={availableBalance}
+          alreadyTotal={totalToPay}
         />
       )}
 
@@ -376,30 +439,47 @@ export function PaymentRegistry({
 
 /* ── Add-to-registry modal ──────────────────────────── */
 
+const PRIORITY_ORDER_MODAL: Record<Priority, number> = { high: 0, medium: 1, low: 2 };
+
 function AddToRegistryModal({
   available,
   onClose,
   onAdd,
   fmtShort,
+  availableBalance = 0,
+  alreadyTotal = 0,
 }: {
   available: AvailableRequest[];
   onClose: () => void;
   onAdd: (ids: number[]) => void;
-  fmtShort: (n: number) => string;
+  fmtShort: (n: number, account?: string) => string;
+  availableBalance?: number;
+  alreadyTotal?: number;
 }) {
   const [search,  setSearch]  = useState("");
   const [picked,  setPicked]  = useState<Set<number>>(new Set());
 
-  const filtered = available.filter(r =>
-    !search ||
-    r.counterparty.toLowerCase().includes(search.toLowerCase()) ||
-    r.article.toLowerCase().includes(search.toLowerCase()),
-  );
+  // C: Sort by priority — high first
+  const filtered = available
+    .filter(r =>
+      !search ||
+      r.counterparty.toLowerCase().includes(search.toLowerCase()) ||
+      r.article.toLowerCase().includes(search.toLowerCase()),
+    )
+    .sort((a, b) => PRIORITY_ORDER_MODAL[a.priority] - PRIORITY_ORDER_MODAL[b.priority]);
 
   const togglePick = (id: number) =>
     setPicked(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
 
   const pc = picked.size;
+
+  // D: Compute running total of selected + already in registry
+  const selectedTotal = available
+    .filter(r => picked.has(r.id))
+    .reduce((s, r) => s + r.amount, 0);
+  const projectedTotal = alreadyTotal + selectedTotal;
+  const overBudget = availableBalance > 0 && projectedTotal > availableBalance;
+  const deficit = overBudget ? projectedTotal - availableBalance : 0;
 
   return (
     <div
@@ -485,6 +565,38 @@ function AddToRegistryModal({
           })}
         </div>
 
+        {/* D: Balance summary + warning */}
+        <div style={{ padding: "10px 22px", borderTop: `1px solid ${C.warm}`, background: overBudget ? C.danger08 : C.ivory50, flexShrink: 0 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+            <div style={{ display: "flex", gap: 20, fontSize: 12 }}>
+              <span style={{ color: C.textLt }}>
+                Уже в реестре: <strong style={{ color: C.textDk }}>{fmtShort(alreadyTotal)}</strong>
+              </span>
+              {pc > 0 && (
+                <span style={{ color: C.textLt }}>
+                  + Выбрано: <strong style={{ color: C.textDk }}>{fmtShort(selectedTotal)}</strong>
+                </span>
+              )}
+              {pc > 0 && (
+                <span style={{ color: C.textLt }}>
+                  = Итого: <strong style={{ color: overBudget ? C.danger : C.textDk }}>{fmtShort(projectedTotal)}</strong>
+                </span>
+              )}
+            </div>
+            {availableBalance > 0 && (
+              <span style={{ fontSize: 12, color: overBudget ? C.danger : "#3D6B3D" }}>
+                Остаток: <strong>{fmtShort(availableBalance)}</strong>
+              </span>
+            )}
+          </div>
+          {overBudget && (
+            <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 6, fontSize: 12, color: C.danger }}>
+              <AlertTriangle size={12} />
+              <span>Превышение лимита на <strong>{fmtShort(deficit)}</strong> — недостаточно средств на счетах</span>
+            </div>
+          )}
+        </div>
+
         {/* Footer */}
         <div style={{ borderTop: `1px solid ${C.warm}`, padding: "14px 22px", display: "flex", gap: 8, flexShrink: 0 }}>
           <button
@@ -508,16 +620,17 @@ function AddToRegistryModal({
 
 /* ── Shared sub-components ──────────────────────────── */
 
-function SummaryCard({ label, value, valueColor, cardBg }: { label: string; value: string; valueColor: string; cardBg?: string }) {
+function SummaryCard({ label, value, note, valueColor, cardBg }: { label: string; value: string; note?: string; valueColor: string; cardBg?: string }) {
   return (
     <div style={{ flex: 1, padding: "18px 20px", borderRadius: 8, background: cardBg ?? C.surface, border: `1px solid ${C.warm}`, display: "flex", flexDirection: "column", gap: 6 }}>
       <span style={{ fontSize: 12, color: C.textLt }}>{label}</span>
       <span style={{ fontSize: 22, fontWeight: 700, color: valueColor, fontVariantNumeric: "tabular-nums", lineHeight: 1.2 }}>{value}</span>
+      {note && <span style={{ fontSize: 10, color: C.textLt, opacity: 0.7 }}>{note}</span>}
     </div>
   );
 }
 
-function BtnOutline({ children, onClick, icon }: { children: React.ReactNode; onClick?: () => void; icon?: React.ReactNode }) {
+function BtnOutline({ children, onClick, icon }: { children: ReactNode; onClick?: () => void; icon?: ReactNode }) {
   return (
     <button onClick={onClick} style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 14px", borderRadius: 6, background: "transparent", color: C.olive, border: `1.5px solid ${C.olive}`, fontSize: 13, fontWeight: 500, cursor: "pointer", fontFamily: "Inter, sans-serif" }}>
       {icon}

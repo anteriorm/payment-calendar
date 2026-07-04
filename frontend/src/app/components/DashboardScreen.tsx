@@ -7,7 +7,7 @@
  * и используйте данные из ответа.
  */
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, type CSSProperties, type ReactNode } from "react";
 import { AlertTriangle, TrendingUp, Clock, ArrowUpCircle, ArrowDownCircle } from "lucide-react";
 import { C } from "../tokens";
 import { useAuth } from "../context/AuthContext";
@@ -108,6 +108,7 @@ export function DashboardScreen() {
               valueColor={C.olive}
               icon={<Clock size={18} color={C.olive} />}
               bg={C.olive20}
+              showRubNote={false}
             />
             <StatCard
               label="Платежей сегодня"
@@ -316,10 +317,11 @@ function SvgBarChart({ data, height }: SvgBarChartProps) {
 /* ── Sub-components ───────────────────────────────────────── */
 
 function StatCard({
-  label, value, valueSuffix, sub, valueColor, icon, bg,
+  label, value, valueSuffix, sub, valueColor, icon, bg, showRubNote = true,
 }: {
   label: string; value: string; valueSuffix?: string;
-  sub?: string; valueColor: string; icon: React.ReactNode; bg: string;
+  sub?: string; valueColor: string; icon: ReactNode; bg: string;
+  showRubNote?: boolean;
 }) {
   return (
     <div
@@ -350,6 +352,7 @@ function StatCard({
           {valueSuffix && <span style={{ fontSize: 12, fontWeight: 400, color: C.textLt }}>{valueSuffix}</span>}
         </div>
         {sub && <div style={{ fontSize: 11, color: C.textLt, marginTop: 3 }}>{sub}</div>}
+        {showRubNote && <div style={{ fontSize: 10, color: C.textLt, opacity: 0.65, marginTop: 2 }}>RUB-экв.</div>}
       </div>
     </div>
   );
@@ -366,7 +369,7 @@ function LegendDot({ color, label }: { color: string; label: string }) {
 
 /* ── Skeleton loader ─────────────────────────────────────── */
 function DashboardSkeleton() {
-  const pulse: React.CSSProperties = {
+  const pulse: CSSProperties = {
     background: `linear-gradient(90deg, ${C.ivory} 25%, ${C.warm} 50%, ${C.ivory} 75%)`,
     backgroundSize: "200% 100%",
     animation: "pulse 1.4s ease-in-out infinite",

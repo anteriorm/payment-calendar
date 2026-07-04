@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback, useEffect, type MouseEvent, type ReactNode, type Ref } from "react";
 import { ChevronLeft, ChevronRight, AlertTriangle, Calendar as CalIcon, GripVertical } from "lucide-react";
 import { useDrag, useDrop } from "react-dnd";
 import { C } from "../tokens";
@@ -9,10 +9,14 @@ type DayState = "positive" | "cashgap" | "zero";
 type AccKey   = "acc1" | "acc2" | "cash";
 
 export interface SelectedCell {
-  dayDate:        number;
-  accKey:         AccKey;
-  isCashGap?:     boolean;
-  deficitAmount?: number;
+  dayDate:          number;
+  accKey:           AccKey;
+  isCashGap?:       boolean;
+  deficitAmount?:   number;
+  /** FIX #3: дата кликнутой ячейки "ДД.ММ.ГГГГ" — для drawer (from-дата переноса) */
+  clickedDateStr?:  string;
+  /** FIX #3: расход по кликнутому счёту — для drawer (сумма переноса) */
+  cellExpense?:     number;
 }
 
 interface DayEntry { income: number; expense: number; balance: number; }
@@ -208,13 +212,13 @@ export function PaymentCalendar({ onCreateRequest, onSelectRequest, onGoToRegist
     STATIC_DAYS.map(d => ({ ...d, acc1: {...d.acc1}, acc2: {...d.acc2}, cash: {...d.cash}, total: {...d.total} }))
   );
 
-  /* ── Local day lookup — MUST be declared before matrixDays/gridCells ── */
+  /* ── Local day lookup — поиск по date+month без ограничений по году/месяцу ── */
   const getDayDataLocal = useCallback((d: Date): CalendarDay => {
-    if (d.getFullYear() === 2026 && d.getMonth() === 5) {
-      const found = mutableDays.find(x => x.date === d.getDate());
-      if (found) return found;
-    }
-    return genDay(d);
+    // FIX #1: убран хардкод "только июнь 2026"; поиск по date И month
+    const found = mutableDays.find(
+      x => x.date === d.getDate() && x.month === d.getMonth()
+    );
+    return found ?? genDay(d);
   }, [mutableDays]);
 
   /**
@@ -226,7 +230,7 @@ export function PaymentCalendar({ onCreateRequest, onSelectRequest, onGoToRegist
     fromStr: string,
     toStr:   string,
     amount:  number,
-    accKey:  AccKey = "acc1",   // по умолчанию acc1 для совместимости с drawer
+    accKey:  AccKey | "total" = "acc1",  // FIX #5: "total" = двигать все три счёта
   ) => {
     const from = parseDate(fromStr);
     const to   = parseDate(toStr);
@@ -241,33 +245,56 @@ export function PaymentCalendar({ onCreateRequest, onSelectRequest, onGoToRegist
         total: { ...d.total },
       }));
 
-      const fromDay = from.getFullYear() === 2026 && from.getMonth() === 5
-        ? next.find(x => x.date === from.getDate()) : null;
-      const toDay = to.getFullYear() === 2026 && to.getMonth() === 5
-        ? next.find(x => x.date === to.getDate()) : null;
+      // FIX #2: getMutable — ищет день по date+month; если нет — генерирует и добавляет.
+      // Это позволяет переносить платежи на/с ЛЮБОЙ даты, не только из STATIC_DAYS.
+      const getMutable = (date: Date): CalendarDay => {
+        const existing = next.find(
+          x => x.date === date.getDate() && x.month === date.getMonth()
+        );
+        if (existing) return existing;
+        // Генерируем и добавляем в mutableDays — следующий рендер увидит изменения
+        const g = genDay(date);
+        const cloned: CalendarDay = {
+          ...g,
+          acc1: { ...g.acc1 }, acc2: { ...g.acc2 },
+          cash: { ...g.cash }, total: { ...g.total },
+        };
+        next.push(cloned);
+        return cloned;
+      };
 
-      // Уменьшаем расход на ИСХОДНОМ дне для конкретного счёта
-      if (fromDay) {
-        const acc = fromDay[accKey];
+      const fromDay = getMutable(from);
+      const toDay   = getMutable(to);
+
+      if (accKey === "total") {
+        // FIX #5: Grid-view DnD — двигаем ВСЕ три счёта, чтобы перенести разрыв полностью.
+        // Если двигать только acc1 (как раньше), acc2 и cash оставались на исходном дне
+        // → кассовый разрыв сохранялся.
+        const KEYS: AccKey[] = ["acc1", "acc2", "cash"];
+        for (const key of KEYS) {
+          const moved = fromDay[key].expense;   // переносим весь расход каждого счёта
+          fromDay[key].expense -= moved;
+          fromDay[key].balance  = fromDay[key].income - fromDay[key].expense;
+          toDay[key].expense   += moved;
+          toDay[key].balance    = toDay[key].income - toDay[key].expense;
+        }
+      } else {
+        // Matrix-view DnD и drawer — двигаем один конкретный счёт
+        const acc   = fromDay[accKey];
         const moved = Math.min(amount, acc.expense);
         acc.expense -= moved;
         acc.balance  = acc.income - acc.expense;
-        // Пересчитываем total как сумму всех счётов
-        fromDay.total.expense = fromDay.acc1.expense + fromDay.acc2.expense + fromDay.cash.expense;
-        fromDay.total.income  = fromDay.acc1.income  + fromDay.acc2.income  + fromDay.cash.income;
-        fromDay.total.balance = fromDay.total.income  - fromDay.total.expense;
-        fromDay.state = fromDay.total.balance < 0 ? "cashgap" : fromDay.total.balance === 0 ? "zero" : "positive";
+        const toAcc = toDay[accKey];
+        toAcc.expense += moved;
+        toAcc.balance  = toAcc.income - toAcc.expense;
       }
 
-      // Увеличиваем расход на ЦЕЛЕВОМ дне для того же счёта
-      if (toDay) {
-        const acc = toDay[accKey];
-        acc.expense += amount;
-        acc.balance  = acc.income - acc.expense;
-        toDay.total.expense = toDay.acc1.expense + toDay.acc2.expense + toDay.cash.expense;
-        toDay.total.income  = toDay.acc1.income  + toDay.acc2.income  + toDay.cash.income;
-        toDay.total.balance = toDay.total.income  - toDay.total.expense;
-        toDay.state = toDay.total.balance < 0 ? "cashgap" : toDay.total.balance === 0 ? "zero" : "positive";
+      // Пересчитываем итоговые строки для обоих дней (одинаково для обоих режимов)
+      for (const day of [fromDay, toDay]) {
+        day.total.expense = day.acc1.expense + day.acc2.expense + day.cash.expense;
+        day.total.income  = day.acc1.income  + day.acc2.income  + day.cash.income;
+        day.total.balance = day.total.income - day.total.expense;
+        day.state = day.total.balance < 0 ? "cashgap" : day.total.balance === 0 ? "zero" : "positive";
       }
 
       return next;
@@ -279,6 +306,22 @@ export function PaymentCalendar({ onCreateRequest, onSelectRequest, onGoToRegist
     onRescheduleReady?.(reschedulePayment);
   }, [reschedulePayment, onRescheduleReady]);
 
+  /**
+   * FIX #2a: getMonthCellsLocal — использует getDayDataLocal вместо модульного getDayData.
+   * Нужно для квартального вида, чтобы reschedulePayment-изменения были видны
+   * во всех трёх месяцах квартала, а не только в текущем (gridCells).
+   */
+  const getMonthCellsLocal = useCallback((month: number, year: number): (CalendarDay | null)[] => {
+    const first = new Date(year, month, 1);
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    let pad = first.getDay() - 1; if (pad < 0) pad = 6;
+    const cells: (CalendarDay | null)[] = [];
+    for (let i = 0; i < pad; i++) cells.push(null);
+    for (let d = 1; d <= daysInMonth; d++) cells.push(getDayDataLocal(new Date(year, month, d)));
+    while (cells.length % 7 !== 0) cells.push(null);
+    return cells;
+  }, [getDayDataLocal]);
+
   const [period,       setPeriod]       = useState<Period>("week");
   const [dayOffset,    setDayOffset]    = useState(0);
   const [pageIndex,    setPageIndex]    = useState(0);
@@ -286,7 +329,11 @@ export function PaymentCalendar({ onCreateRequest, onSelectRequest, onGoToRegist
   const [tooltip,      setTooltip]      = useState<TooltipState | null>(null);
   const [customFrom,   setCustomFrom]   = useState("23.06.2026");
   const [customTo,     setCustomTo]     = useState("29.06.2026");
-  const [statusFilter, setStatusFilter] = useState("");
+  const [statusFilter,       setStatusFilter]       = useState("");
+  const [articleFilter,      setArticleFilter]      = useState("");
+  const [counterpartyFilter, setCounterpartyFilter] = useState("");
+  /** Фильтр счёта для Month/Quarter grid — "total" = все счета */
+  const [gridAccKey,         setGridAccKey]         = useState<AccKey | "total">("total");
 
   /* ── Derived display state ── */
   const anchor        = offsetToDate(dayOffset);
@@ -405,12 +452,27 @@ export function PaymentCalendar({ onCreateRequest, onSelectRequest, onGoToRegist
   };
 
   /* ── Tooltip handlers ── */
-  const handleCellEnter = (e: React.MouseEvent, dayDate: number, accKey: AccKey) => {
+  const handleCellEnter = (e: MouseEvent, dayDate: number, accKey: AccKey) => {
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
     setTooltip({ dayDate, accKey, x: rect.right+8, y: rect.top });
   };
-  const handleCellClick = (day: CalendarDay, accKey: AccKey) => {
-    onSelectRequest?.({ dayDate: day.date, accKey, isCashGap: day.state==="cashgap", deficitAmount: day.state==="cashgap"?day.total.balance:undefined });
+  /**
+   * FIX #3: handleCellClick теперь передаёт дату кликнутой ячейки и сумму расхода.
+   * year — год ячейки (dispYear покрывает большинство случаев, для квартала
+   *         все месяцы обычно в одном году).
+   */
+  const handleCellClick = (day: CalendarDay, accKey: AccKey, year: number = dispYear) => {
+    const dd  = String(day.date).padStart(2, "0");
+    const mm  = String(day.month + 1).padStart(2, "0");
+    const clickedDateStr = `${dd}.${mm}.${year}`;
+    onSelectRequest?.({
+      dayDate:        day.date,
+      accKey,
+      isCashGap:      day.state === "cashgap",
+      deficitAmount:  day.state === "cashgap" ? day.total.balance : undefined,
+      clickedDateStr,
+      cellExpense:    day[accKey].expense,
+    });
   };
 
   /* ── Range hint label for custom mode ── */
@@ -499,8 +561,46 @@ export function PaymentCalendar({ onCreateRequest, onSelectRequest, onGoToRegist
           )}
         </div>
 
+        {/* Account filter — только для Month/Quarter */}
+        {useGrid && (
+          <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+            <span style={{ fontSize:12, color:C.textLt, whiteSpace:"nowrap" }}>Счёт:</span>
+            <div style={{ position:"relative" }}>
+              <select
+                value={gridAccKey}
+                onChange={e => setGridAccKey(e.target.value as AccKey | "total")}
+                style={{
+                  padding:"5px 28px 5px 10px",
+                  border: gridAccKey !== "total" ? `1.5px solid ${C.sage}` : `1px solid ${C.warm}`,
+                  borderRadius:6,
+                  background: gridAccKey !== "total" ? C.sage10 : C.surface,
+                  color: gridAccKey !== "total" ? C.sage : C.textLt,
+                  fontSize:12,
+                  fontWeight: gridAccKey !== "total" ? 600 : 400,
+                  cursor:"pointer",
+                  fontFamily:"Inter, sans-serif",
+                  outline:"none",
+                  appearance:"none",
+                }}
+              >
+                <option value="total">Все счета</option>
+                <option value="acc1">Расчётный №1</option>
+                <option value="acc2">Расчётный №2</option>
+                <option value="cash">Касса</option>
+              </select>
+              <div style={{ position:"absolute", right:7, top:"50%", transform:"translateY(-50%)", pointerEvents:"none", color: gridAccKey !== "total" ? C.sage : C.textLt, display:"flex" }}>
+                <ChevronRight size={11} style={{ transform:"rotate(90deg)" }} />
+              </div>
+            </div>
+            {gridAccKey !== "total" && (
+              <button onClick={() => setGridAccKey("total")}
+                title="Сбросить" style={{ background:"none", border:"none", cursor:"pointer", color:C.textLt, padding:"2px 4px", fontSize:14, lineHeight:1, borderRadius:4 }}>×</button>
+            )}
+          </div>
+        )}
+
         {/* Status filter */}
-        <div style={{ display:"flex", alignItems:"center", gap:6, marginLeft:"auto" }}>
+        <div style={{ display:"flex", alignItems:"center", gap:6, marginLeft: useGrid ? 0 : "auto" }}>
           <span style={{ fontSize:12, color:C.textLt, whiteSpace:"nowrap" }}>Статус:</span>
           <div style={{ position:"relative" }}>
             <select
@@ -540,6 +640,86 @@ export function PaymentCalendar({ onCreateRequest, onSelectRequest, onGoToRegist
           )}
         </div>
 
+        {/* Article filter */}
+        <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+          <span style={{ fontSize:12, color:C.textLt, whiteSpace:"nowrap" }}>Статья:</span>
+          <div style={{ position:"relative" }}>
+            <select
+              value={articleFilter}
+              onChange={e => setArticleFilter(e.target.value)}
+              style={{
+                padding:"5px 28px 5px 10px",
+                border: articleFilter ? `1.5px solid ${C.sage}` : `1px solid ${C.warm}`,
+                borderRadius:6,
+                background: articleFilter ? C.sage10 : C.surface,
+                color: articleFilter ? C.sage : C.textLt,
+                fontSize:12,
+                fontWeight: articleFilter ? 600 : 400,
+                cursor:"pointer",
+                fontFamily:"Inter, sans-serif",
+                outline:"none",
+                appearance:"none",
+                maxWidth: 140,
+              }}
+            >
+              <option value="">Все</option>
+              <option value="Аренда офиса">Аренда офиса</option>
+              <option value="Заработная плата">Заработная плата</option>
+              <option value="Расходные материалы">Расходные материалы</option>
+              <option value="Услуги подрядчиков">Услуги подрядчиков</option>
+              <option value="Налоги и сборы">Налоги и сборы</option>
+              <option value="Прочие расходы">Прочие расходы</option>
+            </select>
+            <div style={{ position:"absolute", right:7, top:"50%", transform:"translateY(-50%)", pointerEvents:"none", color: articleFilter ? C.sage : C.textLt, display:"flex" }}>
+              <ChevronRight size={11} style={{ transform:"rotate(90deg)" }} />
+            </div>
+          </div>
+          {articleFilter && (
+            <button onClick={() => setArticleFilter("")} title="Сбросить"
+              style={{ background:"none", border:"none", cursor:"pointer", color:C.textLt, padding:"2px 4px", fontSize:14, lineHeight:1, borderRadius:4 }}>×</button>
+          )}
+        </div>
+
+        {/* Counterparty filter */}
+        <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+          <span style={{ fontSize:12, color:C.textLt, whiteSpace:"nowrap" }}>Контрагент:</span>
+          <div style={{ position:"relative" }}>
+            <select
+              value={counterpartyFilter}
+              onChange={e => setCounterpartyFilter(e.target.value)}
+              style={{
+                padding:"5px 28px 5px 10px",
+                border: counterpartyFilter ? `1.5px solid ${C.sage}` : `1px solid ${C.warm}`,
+                borderRadius:6,
+                background: counterpartyFilter ? C.sage10 : C.surface,
+                color: counterpartyFilter ? C.sage : C.textLt,
+                fontSize:12,
+                fontWeight: counterpartyFilter ? 600 : 400,
+                cursor:"pointer",
+                fontFamily:"Inter, sans-serif",
+                outline:"none",
+                appearance:"none",
+                maxWidth: 160,
+              }}
+            >
+              <option value="">Все</option>
+              <option value="ООО РентаГрупп">ООО РентаГрупп</option>
+              <option value="ИП Смирнов А.В.">ИП Смирнов А.В.</option>
+              <option value="АО ТехСервис">АО ТехСервис</option>
+              <option value="ООО Поставщик Альфа">ООО Поставщик Альфа</option>
+              <option value="ПАО Энергоресурс">ПАО Энергоресурс</option>
+              <option value="ООО ТехСервис">ООО ТехСервис</option>
+            </select>
+            <div style={{ position:"absolute", right:7, top:"50%", transform:"translateY(-50%)", pointerEvents:"none", color: counterpartyFilter ? C.sage : C.textLt, display:"flex" }}>
+              <ChevronRight size={11} style={{ transform:"rotate(90deg)" }} />
+            </div>
+          </div>
+          {counterpartyFilter && (
+            <button onClick={() => setCounterpartyFilter("")} title="Сбросить"
+              style={{ background:"none", border:"none", cursor:"pointer", color:C.textLt, padding:"2px 4px", fontSize:14, lineHeight:1, borderRadius:4 }}>×</button>
+          )}
+        </div>
+
         {/* Action buttons — render only when role permits */}
         {(onCreateRequest || onGoToRegistry) && (
           <div style={{ display:"flex", alignItems:"center", gap:8 }}>
@@ -559,23 +739,33 @@ export function PaymentCalendar({ onCreateRequest, onSelectRequest, onGoToRegist
         )}
       </div>
 
-      {/* ── Status filter banner ── */}
-      {statusFilter && (() => {
-        const LABELS: Record<string, string> = {
+      {/* ── Active filters banner — показывается при любом активном фильтре ── */}
+      {(statusFilter || articleFilter || counterpartyFilter) && (() => {
+        const STATUS_LABELS: Record<string, string> = {
           draft: "Черновик", pending: "На согласовании", approved: "Согласована",
           inRegistry: "В реестре", paid: "Оплачена",
         };
+        const chips: string[] = [];
+        if (statusFilter)       chips.push(`статус: «${STATUS_LABELS[statusFilter] ?? statusFilter}»`);
+        if (articleFilter)      chips.push(`статья: «${articleFilter}»`);
+        if (counterpartyFilter) chips.push(`контрагент: «${counterpartyFilter}»`);
         return (
-          <div style={{ background: C.sage10, borderBottom: `1px solid ${C.sage}`, padding: "6px 24px", display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+          <div style={{ background: C.sage10, borderBottom: `1px solid ${C.sage}`, padding: "6px 24px", display: "flex", alignItems: "center", gap: 10, flexShrink: 0, flexWrap: "wrap" }}>
             <span style={{ fontSize: 12, color: C.sage, fontWeight: 600 }}>
-              Фильтр: только платежи в статусе «{LABELS[statusFilter]}»
+              Активные фильтры:
             </span>
+            {chips.map((chip, i) => (
+              <span key={i} style={{ fontSize: 12, color: "#3D6B3D", background: "rgba(100,160,100,0.15)", padding: "1px 8px", borderRadius: 10 }}>
+                {chip}
+              </span>
+            ))}
             <span style={{ fontSize: 11, color: C.textLt }}>
-              — суммы скорректированы для демонстрации
+              — при подключении бэкенда суммы будут пересчитаны
             </span>
-            <button onClick={() => setStatusFilter("")}
+            <button
+              onClick={() => { setStatusFilter(""); setArticleFilter(""); setCounterpartyFilter(""); }}
               style={{ marginLeft: "auto", background: "none", border: `1px solid ${C.sage}`, borderRadius: 4, padding: "2px 10px", fontSize: 11, color: C.sage, cursor: "pointer", fontFamily: "Inter, sans-serif" }}>
-              Сбросить
+              Сбросить все
             </button>
           </div>
         );
@@ -590,7 +780,7 @@ export function PaymentCalendar({ onCreateRequest, onSelectRequest, onGoToRegist
             <div style={{ display:"flex", flexDirection:"column", gap:20 }}>
               {[0, 1, 2].map(offset => {
                 const mMonth = qStartMonth + offset;          // always 0-11
-                const cells  = getMonthCells(mMonth, dispYear);
+                const cells  = getMonthCellsLocal(mMonth, dispYear);  // FIX #2a: использует mutableDays
                 return (
                   <div key={mMonth} style={{ background:C.surface, border:`1px solid ${C.warm}`, borderRadius:8, overflow:"hidden", boxShadow:"0 1px 3px rgba(44,44,30,0.10)" }}>
                     <div style={{ padding:"10px 16px", background:C.ivory, borderBottom:`1px solid ${C.warm}`, fontSize:14, fontWeight:600, color:C.textDk }}>
@@ -606,7 +796,15 @@ export function PaymentCalendar({ onCreateRequest, onSelectRequest, onGoToRegist
                     <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)" }}>
                       {cells.map((day, i) => (
                         <GridDayCell key={i} day={day} isWeekend={i%7>=5} dense={dense}
-                          onClick={() => day && handleCellClick(day, "acc1")} />
+                          year={dispYear}
+                          gridAccKey={gridAccKey}
+                          canDrag={canReschedule}
+                          onDropReschedule={canReschedule ? (item, toDate, toMonth, toYear) => {
+                      const fromStr = `${String(item.fromDate).padStart(2,"0")}.${String(item.fromMonth+1).padStart(2,"0")}.${item.fromYear}`;
+                      const toStr   = `${String(toDate).padStart(2,"0")}.${String(toMonth+1).padStart(2,"0")}.${toYear}`;
+                      reschedulePayment(fromStr, toStr, item.amount, item.accKey);
+                    } : undefined}
+                          onClick={() => day && handleCellClick(day, gridAccKey === "total" ? "acc1" : gridAccKey, dispYear)} />
                       ))}
                     </div>
                   </div>
@@ -627,7 +825,15 @@ export function PaymentCalendar({ onCreateRequest, onSelectRequest, onGoToRegist
               <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)" }}>
                 {gridCells.map((day, i) => (
                   <GridDayCell key={i} day={day} isWeekend={i%7>=5} dense={dense}
-                    onClick={() => day && handleCellClick(day, "acc1")} />
+                    year={dispYear}
+                    gridAccKey={gridAccKey}
+                    canDrag={canReschedule}
+                    onDropReschedule={canReschedule ? (item, toDate, toMonth, toYear) => {
+                      const fromStr = `${String(item.fromDate).padStart(2,"0")}.${String(item.fromMonth+1).padStart(2,"0")}.${item.fromYear}`;
+                      const toStr   = `${String(toDate).padStart(2,"0")}.${String(toMonth+1).padStart(2,"0")}.${toYear}`;
+                      reschedulePayment(fromStr, toStr, item.amount, item.accKey);
+                    } : undefined}
+                    onClick={() => day && handleCellClick(day, gridAccKey === "total" ? "acc1" : gridAccKey, dispYear)} />
                 ))}
               </div>
             </div>
@@ -683,19 +889,18 @@ export function PaymentCalendar({ onCreateRequest, onSelectRequest, onGoToRegist
                   {/* Account rows — draggable only when canReschedule=true */}
                   {canReschedule ? (
                     <DroppableColumn day={day} onDropReschedule={(item, toDate, toMonth) => {
-                      const year = offsetToDate(matrixOffset).getFullYear();
-                      const fromStr = `${String(item.fromDate).padStart(2,"0")}.${String(item.fromMonth+1).padStart(2,"0")}.${year}`;
-                      const toStr   = `${String(toDate).padStart(2,"0")}.${String(toMonth+1).padStart(2,"0")}.${year}`;
-                      // Передаём item.accKey — перенос происходит именно на том счёте, который перетащили
+                      const toYear  = offsetToDate(matrixOffset).getFullYear();
+                      const fromStr = `${String(item.fromDate).padStart(2,"0")}.${String(item.fromMonth+1).padStart(2,"0")}.${item.fromYear}`;  // FIX #4: fromYear из item
+                      const toStr   = `${String(toDate).padStart(2,"0")}.${String(toMonth+1).padStart(2,"0")}.${toYear}`;
                       reschedulePayment(fromStr, toStr, item.amount, item.accKey);
                     }}>
                       {ACCOUNTS.map(acc => (
                         <DraggableCellRow
                           key={`${day.date}-${acc.key}`}
                           entry={day[acc.key]} height={ROW_H} bg={colBg} dense={dense}
-                          fromDate={day.date} fromMonth={day.month} accKey={acc.key}
+                          fromDate={day.date} fromMonth={day.month} fromYear={offsetToDate(matrixOffset).getFullYear()} accKey={acc.key}
                           canDrag={true}
-                          onClick={() => handleCellClick(day, acc.key)}
+                          onClick={() => handleCellClick(day, acc.key, dispYear)}
                           onMouseEnter={e => handleCellEnter(e, day.date, acc.key)}
                           onMouseLeave={() => setTooltip(null)}
                         />
@@ -708,7 +913,7 @@ export function PaymentCalendar({ onCreateRequest, onSelectRequest, onGoToRegist
                         <CellRow
                           key={`${day.date}-${acc.key}`}
                           entry={day[acc.key]} height={ROW_H} bg={colBg} dense={dense}
-                          onClick={() => handleCellClick(day, acc.key)}
+                          onClick={() => handleCellClick(day, acc.key, dispYear)}
                           onMouseEnter={e => handleCellEnter(e, day.date, acc.key)}
                           onMouseLeave={() => setTooltip(null)}
                         />
@@ -778,14 +983,54 @@ export function PaymentCalendar({ onCreateRequest, onSelectRequest, onGoToRegist
   );
 }
 
+/**
+ * FIX #4: GridDayCell теперь поддерживает drag-and-drop.
+ * - Кассовые разрывы ПЕРЕТАСКИВАЮТСЯ когда canDrag=true
+ * - Все непустые дни принимают DROP
+ * - Grip-иконка показывается на кассовых разрывах
+ */
 /* ── GridDayCell ─────────────────────────────────────── */
-function GridDayCell({ day, isWeekend, dense, onClick }: {
+function GridDayCell({ day, isWeekend, dense, onClick, year = 2026, canDrag = false, gridAccKey = "total", onDropReschedule }: {
   day: CalendarDay | null;
   isWeekend: boolean;
   dense: boolean;
   onClick: () => void;
+  year?: number;
+  canDrag?: boolean;
+  gridAccKey?: AccKey | "total";
+  onDropReschedule?: (from: DragItem, toDate: number, toMonth: number, toYear: number) => void;
 }) {
   const [hov, setHov] = useState(false);
+
+  // Данные выбранного счёта (или итог если "total")
+  const displayEntry = day ? (gridAccKey === "total" ? day.total : day[gridAccKey]) : null;
+  const displayState: DayState = day
+    ? (gridAccKey === "total"
+        ? day.state
+        : displayEntry!.balance < 0 ? "cashgap" : displayEntry!.balance === 0 ? "zero" : "positive")
+    : "positive";
+
+  const isDraggable = canDrag && !!day && displayState === "cashgap" && (displayEntry?.expense ?? 0) > 0;
+
+  const [{ isDragging }, drag] = useDrag<DragItem, void, { isDragging: boolean }>({
+    type: DND_TYPE,
+    item: day ? { fromDate: day.date, fromMonth: day.month, fromYear: year, amount: displayEntry?.expense ?? 0, accKey: gridAccKey === "total" ? "total" : gridAccKey } : null!,
+    canDrag: () => isDraggable,
+    collect: m => ({ isDragging: m.isDragging() }),
+  });
+
+  const [{ isOver, canDrop }, drop] = useDrop<DragItem, void, { isOver: boolean; canDrop: boolean }>({
+    accept: DND_TYPE,
+    canDrop: item => !!day && (item.fromDate !== day.date || item.fromMonth !== day.month),
+    drop:    item => day && onDropReschedule?.(item, day.date, day.month, year),
+    collect: m => ({ isOver: m.isOver(), canDrop: m.canDrop() }),
+  });
+
+  // Объединяем drag + drop на одном элементе
+  const cellRef = (node: HTMLDivElement | null) => {
+    if (isDraggable) drag(node);
+    if (onDropReschedule) drop(node);
+  };
 
   if (!day) {
     return (
@@ -793,18 +1038,32 @@ function GridDayCell({ day, isWeekend, dense, onClick }: {
     );
   }
 
-  // Фон: только кассовый разрыв красный, выходные чуть серее, остальные белые
-  const baseBg  = day.state === "cashgap" ? C.danger12 : isWeekend ? C.ivory : C.surface;
-  // Рамки: единый нейтральный (сегодня выделяем кружком на дате, не рамкой)
-  const border  = `1px solid ${C.warm}`;
+  const baseBg = displayState === "cashgap" ? C.danger12 : isWeekend ? C.ivory : C.surface;
+  const border = isOver && canDrop ? `2px dashed ${C.sage}` : `1px solid ${C.warm}`;
 
   return (
     <div
+      ref={cellRef}
       onMouseEnter={() => setHov(true)}
       onMouseLeave={() => setHov(false)}
       onClick={onClick}
-      style={{ minHeight: GRID_CELL_H, background: hov ? C.beige40 : baseBg, border, cursor:"pointer", padding:"7px 9px", display:"flex", flexDirection:"column", transition:"background 0.1s", margin:-0.5 }}
+      style={{
+        minHeight: GRID_CELL_H, margin: -0.5,
+        background: isOver && canDrop ? C.sage10 : hov ? C.beige40 : baseBg,
+        border, cursor: isDraggable ? "grab" : "pointer",
+        padding:"7px 9px", display:"flex", flexDirection:"column",
+        transition:"background 0.1s, border 0.1s",
+        overflow:"hidden", minWidth: 0,    /* FIX #2b */
+        opacity: isDragging ? 0.45 : 1,
+        position: "relative",
+      }}
     >
+      {/* FIX #4: grip-иконка на кассовых разрывах (только для Казначея) */}
+      {isDraggable && (
+        <div style={{ position:"absolute", top:3, right:3, color:C.danger, opacity:0.6, pointerEvents:"none" }}>
+          <GripVertical size={9} />
+        </div>
+      )}
       {/* Date number */}
       <div style={{ marginBottom: day.state==="cashgap" ? 3 : 6 }}>
         {day.isToday ? (
@@ -817,7 +1076,7 @@ function GridDayCell({ day, isWeekend, dense, onClick }: {
       </div>
 
       {/* Cashgap label */}
-      {day.state==="cashgap" && (
+      {displayState==="cashgap" && (
         <div style={{ display:"flex", alignItems:"center", gap:2, marginBottom:4 }}>
           <AlertTriangle size={8} color={C.danger} />
           <span style={{ fontSize:9, color:C.danger, fontWeight:600, whiteSpace:"nowrap" }}>Кассовый разрыв</span>
@@ -825,15 +1084,16 @@ function GridDayCell({ day, isWeekend, dense, onClick }: {
       )}
 
       {dense ? (
-        <span style={{ fontSize:13, fontWeight:700, color: day.total.balance<0?C.danger:C.textDk, fontVariantNumeric:"tabular-nums", marginTop:"auto" }}>
-          {fmtBalance(day.total.balance)}
+        <span style={{ fontSize:11, fontWeight:700, color: (displayEntry?.balance ?? 0)<0?C.danger:C.textDk, fontVariantNumeric:"tabular-nums", marginTop:"auto", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+          {fmtBalance(displayEntry?.balance ?? 0)}
         </span>
       ) : (
-        <div style={{ display:"flex", flexDirection:"column", gap:1, marginTop:"auto", fontVariantNumeric:"tabular-nums" }}>
-          <div style={{ fontSize:12, fontWeight:500, color:C.sage }}>↑ {fmtAmt(day.total.income)}</div>
-          <div style={{ fontSize:12, fontWeight:500, color:C.danger }}>↓ {fmtAmt(day.total.expense)}</div>
-          <div style={{ fontSize:13, fontWeight:700, color: day.total.balance<0?C.danger:C.textDk, marginTop:1 }}>
-            = {fmtBalance(day.total.balance)}
+        /* FIX #2b: overflow hidden + text-overflow на каждой строке суммы */
+        <div style={{ display:"flex", flexDirection:"column", gap:1, marginTop:"auto", fontVariantNumeric:"tabular-nums", minWidth:0 }}>
+          <div style={{ fontSize:11, fontWeight:500, color:C.sage, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>↑ {fmtAmt(displayEntry?.income ?? 0)}</div>
+          <div style={{ fontSize:11, fontWeight:500, color:C.danger, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>↓ {fmtAmt(displayEntry?.expense ?? 0)}</div>
+          <div style={{ fontSize:12, fontWeight:700, color: (displayEntry?.balance ?? 0)<0?C.danger:C.textDk, marginTop:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+            = {fmtBalance(displayEntry?.balance ?? 0)}
           </div>
         </div>
       )}
@@ -845,10 +1105,11 @@ function GridDayCell({ day, isWeekend, dense, onClick }: {
 const DND_TYPE = "PAYMENT_CELL";
 
 interface DragItem {
-  fromDate:  number;  // day.date
+  fromDate:  number;   // day.date
   fromMonth: number;
+  fromYear:  number;
   amount:    number;
-  accKey:    AccKey;
+  accKey:    AccKey | "total";  // FIX #5: "total" = двигать все три счёта (grid-view DnD)
 }
 
 /**
@@ -856,21 +1117,21 @@ interface DragItem {
  * При drag начинается с указанной ячейки, при drop вызывается onDropReschedule.
  */
 function DraggableCellRow({
-  entry, height, bg, bgHover, dense, fromDate, fromMonth, accKey, canDrag = true, onDropReschedule, ...rest
+  entry, height, bg, bgHover, dense, fromDate, fromMonth, fromYear = 2026, accKey, canDrag = true, onDropReschedule, ...rest
 }: CellRowProps & {
-  fromDate: number; fromMonth: number; accKey: AccKey;
+  fromDate: number; fromMonth: number; fromYear?: number; accKey: AccKey;
   canDrag?: boolean;
   onDropReschedule?: (from: DragItem, toDate: number, toMonth: number) => void;
 }) {
   const [{ isDragging }, drag] = useDrag<DragItem, void, { isDragging: boolean }>({
     type: DND_TYPE,
-    item: { fromDate, fromMonth, amount: entry.expense, accKey },
+    item: { fromDate, fromMonth, fromYear, amount: entry.expense, accKey },  // FIX #4
     canDrag: () => canDrag && entry.expense > 0,  // блокируем drag без разрешения
     collect: m => ({ isDragging: m.isDragging() }),
   });
 
   return (
-    <div ref={canDrag ? (drag as unknown as React.Ref<HTMLDivElement>) : undefined}
+    <div ref={canDrag ? (drag as unknown as Ref<HTMLDivElement>) : undefined}
       style={{ opacity: isDragging ? 0.45 : 1, cursor: canDrag && entry.expense > 0 ? "grab" : "default", position: "relative" }}>
       {!dense && entry.expense > 0 && (
         <div style={{ position: "absolute", left: 4, top: "50%", transform: "translateY(-50%)", color: C.warm, opacity: 0.6, zIndex: 1, pointerEvents: "none" }}>
@@ -889,7 +1150,7 @@ function DroppableColumn({
   day, children, onDropReschedule,
 }: {
   day: CalendarDay;
-  children: React.ReactNode;
+  children: ReactNode;
   onDropReschedule?: (from: DragItem, toDate: number, toMonth: number) => void;
 }) {
   const [{ isOver, canDrop }, drop] = useDrop<DragItem, void, { isOver: boolean; canDrop: boolean }>({
@@ -900,7 +1161,7 @@ function DroppableColumn({
   });
 
   return (
-    <div ref={drop as unknown as React.Ref<HTMLDivElement>}
+    <div ref={drop as unknown as Ref<HTMLDivElement>}
       style={{
         position: "relative",
         outline: isOver && canDrop ? `2px dashed ${C.sage}` : undefined,
@@ -916,26 +1177,36 @@ function DroppableColumn({
 interface CellRowProps {
   entry: DayEntry; height: number; bg: string; bgHover?: string;
   dense?: boolean; isTotalRow?: boolean; confirmedAmt?: number;
-  onClick?: () => void; onMouseEnter?: (e: React.MouseEvent) => void; onMouseLeave?: () => void;
+  onClick?: () => void; onMouseEnter?: (e: MouseEvent) => void; onMouseLeave?: () => void;
 }
 function CellRow({ entry, height, bg, bgHover, dense, isTotalRow, confirmedAmt, onClick, onMouseEnter, onMouseLeave }: CellRowProps) {
   const [hov, setHov] = useState(false);
   return (
     <div onMouseEnter={e => { setHov(true); onMouseEnter?.(e); }} onMouseLeave={() => { setHov(false); onMouseLeave?.(); }} onClick={onClick}
-      style={{ height, boxSizing:"border-box" as const, background: hov?(bgHover??C.beige40):bg, borderBottom:`1px solid ${C.warm}`, padding: dense?"0 12px":"8px 12px", display:"flex", flexDirection:"column", alignItems:"flex-start", justifyContent:"center", gap: dense?0:2, cursor: isTotalRow?"default":"pointer", transition:"background 0.1s, height 0.15s", fontVariantNumeric:"tabular-nums", userSelect:"none" }}>
+      style={{
+        height, boxSizing:"border-box" as const,
+        background: hov?(bgHover??C.beige40):bg, borderBottom:`1px solid ${C.warm}`,
+        padding: dense?"0 12px":"8px 12px", display:"flex", flexDirection:"column",
+        alignItems:"flex-start", justifyContent:"center", gap: dense?0:2,
+        cursor: isTotalRow?"default":"pointer", transition:"background 0.1s, height 0.15s",
+        fontVariantNumeric:"tabular-nums", userSelect:"none",
+        overflow:"hidden", minWidth:0,  /* FIX #2b: числа не вылезают за рамку */
+      }}>
       {dense ? (
-        <span style={{ fontSize:14, fontWeight:700, color: entry.balance<0?C.danger:entry.balance===0?C.textLt:C.textDk }}>{fmtBalance(entry.balance)}</span>
+        /* FIX #2b: overflow в компактном режиме */
+        <span style={{ fontSize:13, fontWeight:700, color: entry.balance<0?C.danger:entry.balance===0?C.textLt:C.textDk, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", width:"100%" }}>{fmtBalance(entry.balance)}</span>
       ) : (
         <>
-          <div style={{ fontSize:13, fontWeight:500, color:C.sage }}><span style={{ opacity:0.6 }}>↑</span>{" "}{fmtAmt(entry.income)}</div>
-          <div style={{ fontSize:13, fontWeight:500, color:C.danger }}><span style={{ opacity:0.6 }}>↓</span>{" "}{fmtAmt(entry.expense)}</div>
-          <div style={{ fontSize:14, fontWeight:700, color: entry.balance<0?C.danger:C.textDk, marginTop:3 }}>
-            <span style={{ opacity:0.45, fontSize:11 }}>=</span>{" "}{fmtBalance(entry.balance)}
+          {/* FIX #2b: overflow + text-overflow на каждой строке */}
+          <div style={{ fontSize:12, fontWeight:500, color:C.sage, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", width:"100%" }}><span style={{ opacity:0.6 }}>↑</span>{" "}{fmtAmt(entry.income)}</div>
+          <div style={{ fontSize:12, fontWeight:500, color:C.danger, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", width:"100%" }}><span style={{ opacity:0.6 }}>↓</span>{" "}{fmtAmt(entry.expense)}</div>
+          <div style={{ fontSize:13, fontWeight:700, color: entry.balance<0?C.danger:C.textDk, marginTop:3, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", width:"100%" }}>
+            <span style={{ opacity:0.45, fontSize:10 }}>=</span>{" "}{fmtBalance(entry.balance)}
           </div>
           {confirmedAmt != null && confirmedAmt > 0 && (
-            <div style={{ fontSize:10, color:C.sage, marginTop:2, display:"flex", alignItems:"center", gap:3 }}>
+            <div style={{ fontSize:10, color:C.sage, marginTop:2, display:"flex", alignItems:"center", gap:3, overflow:"hidden", whiteSpace:"nowrap" }}>
               <span>✓</span>
-              <span>{fmtAmt(confirmedAmt)} подтверждено</span>
+              <span>{fmtAmt(confirmedAmt)}</span>
             </div>
           )}
         </>

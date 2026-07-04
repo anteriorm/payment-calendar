@@ -24,6 +24,9 @@ export { registriesService as registries } from "./endpoints/registries";
 export { reportsService as reports }       from "./endpoints/reports";
 export { usersService as users }           from "./endpoints/users";
 export { auditService as audit }           from "./endpoints/audit";
+export { recurringService as recurring }    from "./endpoints/recurring";
+export { currenciesService as currencies }  from "./endpoints/currencies";
+export { approvalsService as approvals }   from "./endpoints/approvals";
 
 // Re-export types for convenience
 export type { Account }         from "./mocks/data/accounts";
@@ -35,3 +38,6 @@ export type { CalendarDay }     from "./mocks/data/calendar";
 export type { User, UserRole }  from "./mocks/data/users";
 export type { Registry, RegistryStatus } from "./endpoints/registries";
 export type { AuditEntry }      from "./endpoints/audit";
+export type { RecurringTemplate, RecurringFrequency } from "./endpoints/recurring";
+export type { Currency }  from "./endpoints/currencies";
+export type { ApprovalRoute, PaymentApproval, ApprovalStageInfo } from "./endpoints/approvals";

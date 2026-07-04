@@ -1,18 +1,24 @@
-import { useState } from "react";
-import { X, Calendar, Search, ChevronDown } from "lucide-react";
+import { useState, useEffect, type CSSProperties, type ReactNode } from "react";
+import { X, Calendar, Search, ChevronDown, GitBranch } from "lucide-react";
 import { useToast } from "./Toast";
 import { C } from "../tokens";
-import { rubToKopecks } from "../utils";
+import { rubToKopecks, getAccountCurrency, getCurrencySymbol } from "../utils";
+import * as api from "../../api";
+import type { ApprovalRoute } from "../../api";
 
 export interface ModalRequestData {
   id?:           number;
   amount?:       string;
   date?:         string;
+  routeId?:      number;
   account?:      string;
   counterparty?: string;
   article?:      string;
   purpose?:      string;
   priority?:     Priority;
+  recurring?:    boolean;
+  frequency?:    Frequency;
+  endDate?:      string;
 }
 
 interface CreateRequestModalProps {
@@ -31,9 +37,9 @@ const PRIORITIES: { value: Priority; label: string; dot: string; accent: string;
 ];
 
 const ACCOUNTS = [
-  { value: "Расчётный №1", label: "Расчётный счёт №1" },
-  { value: "Расчётный №2", label: "Расчётный счёт №2" },
-  { value: "Касса",        label: "Касса"              },
+  { value: "Расчётный №1", label: "Расчётный счёт №1 (RUB)" },
+  { value: "Расчётный №2", label: "Расчётный счёт №2 (USD)" },
+  { value: "Касса",        label: "Касса (RUB)"              },
 ];
 
 const ARTICLES = [
@@ -69,6 +75,16 @@ export function CreateRequestModal({ onClose, initialData, onSave }: CreateReque
   const [endDate,      setEndDate]      = useState("");
   const [focusedField, setFocusedField] = useState<string | null>(null);
   const [errors,       setErrors]       = useState<Record<string, string>>({});
+  const [routes,       setRoutes]       = useState<ApprovalRoute[]>([]);
+  const [selectedRoute,setSelectedRoute]= useState<number>(1);
+
+  useEffect(() => {
+    api.approvals.getRoutes().then(r => {
+      const rs = r as ApprovalRoute[];
+      setRoutes(rs);
+      if (rs.length) setSelectedRoute(rs[0].id);
+    });
+  }, []);
 
   const validate = (): boolean => {
     const e: Record<string, string> = {};
@@ -87,13 +103,13 @@ export function CreateRequestModal({ onClose, initialData, onSave }: CreateReque
     return Object.keys(e).length === 0;
   };
 
-  const focusStyle = (name: string): React.CSSProperties => {
+  const focusStyle = (name: string): CSSProperties => {
     if (errors[name]) return { border: `1.5px solid ${C.danger}`, boxShadow: `0 0 0 3px rgba(192,80,74,0.15)` };
     if (focusedField === name) return { border: `1.5px solid ${C.sage}`, boxShadow: `0 0 0 3px ${C.sage20}` };
     return { border: `1px solid ${C.warm}` };
   };
 
-  const baseInput: React.CSSProperties = {
+  const baseInput: CSSProperties = {
     width: "100%",
     padding: "9px 12px",
     borderRadius: 6,
@@ -138,13 +154,15 @@ export function CreateRequestModal({ onClose, initialData, onSave }: CreateReque
           {/* Сумма */}
           <div>
             {/* STUB: перед отправкой на реальный API конвертировать rubToKopecks(amount)
-                  Пользователь вводит РУБЛИ, API принимает КОПЕЙКИ */}
-            <FieldLabel>Сумма (в рублях)</FieldLabel>
+                  Пользователь вводит сумму в валюте счёта, API принимает в минимальных единицах */}
+            <FieldLabel>Сумма ({getAccountCurrency(account) || "RUB"})</FieldLabel>
             <div style={{ position: "relative" }}>
               <input type="text" placeholder="0" value={amount} onChange={e => setAmount(e.target.value)}
                 onFocus={() => setFocusedField("amount")} onBlur={() => setFocusedField(null)}
                 style={{ ...baseInput, ...focusStyle("amount"), paddingRight: 36 }} />
-              <span style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", fontSize: 14, color: C.textLt, pointerEvents: "none" }}>₽</span>
+              <span style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", fontSize: 14, color: C.textLt, pointerEvents: "none" }}>
+                {getCurrencySymbol(getAccountCurrency(account) || "RUB")}
+              </span>
             </div>
             {errors.amount && <span style={{ fontSize: 11, color: "var(--tm-danger)", marginTop: 4, display: "block" }}>{errors.amount}</span>}
           </div>
@@ -235,6 +253,40 @@ export function CreateRequestModal({ onClose, initialData, onSave }: CreateReque
             </div>
           </div>
 
+          {/* Маршрут согласования */}
+          {!isEdit && routes.length > 0 && (
+            <div>
+              <FieldLabel>
+                <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                  <GitBranch size={12} color={C.sage} />
+                  Маршрут согласования
+                </span>
+              </FieldLabel>
+              <div style={{ display: "flex", gap: 8 }}>
+                {routes.map(r => {
+                  const sel = selectedRoute === r.id;
+                  return (
+                    <button key={r.id} onClick={() => setSelectedRoute(r.id)}
+                      style={{
+                        flex: 1, padding: "9px 8px", borderRadius: 6,
+                        border: sel ? `2px solid ${C.sage}` : `1px solid ${C.warm}`,
+                        background: sel ? C.sage10 : C.surface,
+                        color: sel ? "#3D6B3D" : C.textLt,
+                        fontSize: 12, fontWeight: sel ? 600 : 400,
+                        cursor: "pointer", fontFamily: "Inter, sans-serif",
+                        transition: "all 0.15s", textAlign: "left",
+                        display: "flex", flexDirection: "column", gap: 2,
+                      }}
+                    >
+                      <span style={{ fontWeight: 600 }}>{r.name}</span>
+                      <span style={{ fontSize: 11, opacity: 0.85 }}>{r.description}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {/* Повторяющийся платёж */}
           <div>
             <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
@@ -284,8 +336,8 @@ export function CreateRequestModal({ onClose, initialData, onSave }: CreateReque
             onClick={() => {
               if (!validate()) return;
               // amount — строка в рублях. При вызове реального API: rubToKopecks(amount)
-              const d: ModalRequestData = { id: initialData?.id, amount, date, account, counterparty, article, purpose, priority };
-              if (onSave) { onSave(d, false); } else { showToast(isEdit ? "Изменения сохранены" : "Заявка отправлена на согласование", "success"); onClose(); }
+              const d: ModalRequestData = { id: initialData?.id, amount, date, account, counterparty, article, purpose, priority, recurring, frequency: recurring ? frequency : undefined, endDate: recurring ? endDate : undefined, routeId: !isEdit ? selectedRoute : undefined };
+              if (onSave) { onSave(d, false); } else { showToast(isEdit ? "Изменения сохранены" : (recurring ? "Заявка создана (повторяющийся платёж)" : "Заявка отправлена на согласование"), "success"); onClose(); }
             }}
             style={{ padding: "9px 20px", borderRadius: 6, background: C.sage, color: C.surface, border: "none", fontSize: 14, fontWeight: 500, cursor: "pointer", fontFamily: "Inter, sans-serif" }}>
             {submitLabel}
@@ -294,7 +346,7 @@ export function CreateRequestModal({ onClose, initialData, onSave }: CreateReque
             <button
               onClick={() => {
                 if (!validate()) return;
-                const d: ModalRequestData = { id: initialData?.id, amount, date, account, counterparty, article, purpose, priority };
+                const d: ModalRequestData = { id: initialData?.id, amount, date, account, counterparty, article, purpose, priority, recurring, frequency: recurring ? frequency : undefined, endDate: recurring ? endDate : undefined, routeId: !isEdit ? selectedRoute : undefined };
                 if (onSave) { onSave(d, true); } else { showToast("Черновик сохранён", "warning"); onClose(); }
               }}
               style={{ padding: "9px 16px", borderRadius: 6, background: "transparent", color: C.olive, border: `1.5px solid ${C.olive}`, fontSize: 14, fontWeight: 500, cursor: "pointer", fontFamily: "Inter, sans-serif" }}>
@@ -313,14 +365,14 @@ export function CreateRequestModal({ onClose, initialData, onSave }: CreateReque
 
 /* ── Sub-components ───────────────────────────────── */
 
-function FieldLabel({ children }: { children: React.ReactNode }) {
+function FieldLabel({ children }: { children: ReactNode }) {
   return <label style={{ fontSize: 12, fontWeight: 500, color: C.textLt, display: "block", marginBottom: 6 }}>{children}</label>;
 }
 
 function SelectField({ value, onChange, placeholder, options, focusStyle, baseInput, onFocus, onBlur }: {
   value: string; onChange: (v: string) => void; placeholder: string;
   options: { value: string; label: string }[];
-  focusStyle: React.CSSProperties; baseInput: React.CSSProperties;
+  focusStyle: CSSProperties; baseInput: CSSProperties;
   onFocus: () => void; onBlur: () => void;
 }) {
   return (
