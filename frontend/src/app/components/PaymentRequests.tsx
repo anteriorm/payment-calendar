@@ -311,9 +311,7 @@ export function PaymentRequests({ onCreateRequest }: PaymentRequestsProps) {
     setLoadError(null);
     api.payments.getAll()
       .then(data => {
-        console.log('Raw API data:', data);
         const mapped = (data as unknown[]).map(p => mapApiToRequest(p));
-        console.log('Mapped data:', mapped);
         setRows(mapped);
       })
       .catch((err) => {
@@ -388,8 +386,6 @@ export function PaymentRequests({ onCreateRequest }: PaymentRequestsProps) {
       purpose: data.purpose || '',
       priority: data.priority || 'medium',
     };
-
-    console.log('📦 Отправка payload:', payload); // для отладки
 
     try {
       if (data.id) {
@@ -476,11 +472,7 @@ export function PaymentRequests({ onCreateRequest }: PaymentRequestsProps) {
           <DropFilter value={statusF} onChange={setStatusF} placeholder="Статус" width={155}
             options={Object.entries(STATUS_CFG).map(([v, cfg]) => ({ value: v, label: cfg.label }))} />
           <DropFilter value={accountF} onChange={setAccountF} placeholder="Счёт" width={140}
-            options={[
-              { value: "Расчётный №1", label: "Расчётный №1" },
-              { value: "Расчётный №2", label: "Расчётный №2" },
-              { value: "Касса",        label: "Касса"         },
-            ]} />
+            options={accounts.map(a => ({ value: a.name, label: a.name }))} />
 
           <div style={{ display: "flex", alignItems: "center", gap: 5, flexShrink: 0 }}>
             <span style={{ fontSize: 12, color: C.textLt }}>с</span>

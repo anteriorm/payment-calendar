@@ -94,10 +94,8 @@ export function PaymentCalendar({ onCreateRequest, onSelectRequest, onGoToRegist
 
   const fetchData = (start: string, end: string) => {
     setLoading(true);
-    console.log(`[Calendar] Fetching: ${start} → ${end}`);
     api.calendar.get({ start_date: start, end_date: end })
       .then(data => {
-        console.log(`[Calendar] API returned ${(data as any[]).length} rows:`, data);
         const map = new Map<string, CalendarDay>();
         // Собираем уникальные account_id для маппинга acc1/acc2/cash
         const accountIds = new Set<number>();
@@ -127,7 +125,6 @@ export function PaymentCalendar({ onCreateRequest, onSelectRequest, onGoToRegist
             map.set(row.date, existing);
           }
         });
-        console.log(`[Calendar] Processed ${map.size} days:`, [...map.entries()]);
         setApiDays(map);
       })
       .catch((err) => { console.error("[Calendar] API error:", err); })

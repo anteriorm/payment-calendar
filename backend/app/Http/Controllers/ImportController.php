@@ -47,7 +47,7 @@ class ImportController extends Controller
             // Парсинг даты (дд.мм.гггг → гггг-мм-дд)
             $dateParsed = null;
             if (preg_match('/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/', trim($date), $m)) {
-                $dateParsed = "{$m[3]}-{$m[2]}-{$m[1]}";
+                $dateParsed = sprintf("%04d-%02d-%02d", $m[3], $m[2], $m[1]);
             } elseif (preg_match('/^\d{4}-\d{2}-\d{2}$/', trim($date))) {
                 $dateParsed = trim($date);
             } else {
@@ -55,15 +55,20 @@ class ImportController extends Controller
                 continue;
             }
 
-            // Парсинг суммы (удаляем пробелы и ₽)
-            $amountClean = preg_replace('/[^\d]/', '', $amount);
-            if (!$amountClean || $amountClean <= 0) {
+            // Парсинг суммы в копейки
+            $amountStr = str_replace([' ', '₽', 'руб', 'р.'], '', trim($amount));
+            // Запятую заменяем на точку
+            $amountStr = str_replace(',', '.', $amountStr);
+            if (!is_numeric($amountStr) || $amountStr <= 0) {
                 $errors[] = "Строка $lineNum: неверная сумма '$amount'";
                 continue;
             }
 
+            // Конвертируем в копейки
+            $amountKopecks = (int)round((float)$amountStr * 100);
+
             Payment::create([
-                'amount' => (int)$amountClean,
+                'amount' => $amountKopecks,
                 'planned_date' => $dateParsed,
                 'account_id' => $account->id,
                 'counterparty_id' => $cp->id,

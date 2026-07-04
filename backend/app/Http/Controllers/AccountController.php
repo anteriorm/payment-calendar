@@ -6,6 +6,8 @@ use App\Models\Account;
 use App\Models\Payment;
 use App\Models\Income;
 use Illuminate\Http\Request;
+use Illuminate\Database\QueryException;
+use App\Services\AuditService;
 
 class AccountController extends Controller
 {
@@ -53,6 +55,8 @@ class AccountController extends Controller
             'initial_balance' => $balance,
         ]);
 
+        AuditService::log('account_created', "Счёт «{$account->name}»");
+
         return response()->json($this->formatAccount($account), 201);
     }
 
@@ -77,6 +81,9 @@ class AccountController extends Controller
         unset($validated['opening']);
 
         $account->update($validated);
+
+        AuditService::log('account_updated', "Счёт «{$account->name}»");
+
         return response()->json($this->formatAccount($account));
     }
 
@@ -86,7 +93,14 @@ class AccountController extends Controller
             return response()->json(['message' => 'Доступ запрещён'], 403);
         }
 
-        $account->delete();
+        try {
+            $name = $account->name;
+            $account->delete();
+            AuditService::log('account_deleted', "Счёт «{$name}»");
+        } catch (QueryException $e) {
+            return response()->json(['message' => 'Невозможно удалить счёт — на него ссылаются платежи или поступления'], 422);
+        }
+
         return response()->json(['message' => 'Счёт удалён']);
     }
 }

@@ -9,8 +9,6 @@ class Payment extends Model
 {
     use HasFactory;
 
-    protected $guarded = [];
-
     protected $fillable = [
         'amount',
         'planned_date',

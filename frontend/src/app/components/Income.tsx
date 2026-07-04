@@ -210,9 +210,7 @@ export function Income({ canCreate = true }: IncomeProps) {
     setLoadError(null);
     api.incomes.getAll()
       .then(data => {
-        console.log('Raw Income API data:', data);
         const mapped = (data as unknown[]).map(p => mapApiToIncome(p));
-        console.log('Mapped Income data:', mapped);
         setRows(mapped);
       })
       .catch((err) => {
@@ -349,11 +347,7 @@ export function Income({ canCreate = true }: IncomeProps) {
         <DropFilter value={statusF} onChange={setStatusF} placeholder="Статус" width={148}
           options={Object.entries(STATUS_CFG).map(([v, cfg]) => ({ value: v, label: cfg.label }))} />
         <DropFilter value={accountF} onChange={setAccountF} placeholder="Счёт" width={140}
-          options={[
-            { value: "Расчётный №1", label: "Расчётный №1" },
-            { value: "Расчётный №2", label: "Расчётный №2" },
-            { value: "Касса",        label: "Касса"         },
-          ]} />
+          options={accounts.map(a => ({ value: a.name, label: a.name }))} />
 
         <div style={{ display: "flex", alignItems: "center", gap: 5, flexShrink: 0 }}>
           <span style={{ fontSize: 12, color: C.textLt }}>с</span>

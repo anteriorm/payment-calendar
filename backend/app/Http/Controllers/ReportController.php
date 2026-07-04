@@ -9,6 +9,8 @@ use App\Models\Income;
 use App\Models\Item;
 use Carbon\Carbon;
 
+Carbon::setLocale('ru');
+
 class ReportController extends Controller
 {
     public function balances(Request $request)
@@ -217,7 +219,7 @@ class ReportController extends Controller
             }
 
             if ($budget > 0 || $fact > 0) {
-                $period = $start->format('F Y');
+                $period = $start->translatedFormat('F Y');
                 $result[] = [
                     'period' => $period,
                     'item' => $item->name,

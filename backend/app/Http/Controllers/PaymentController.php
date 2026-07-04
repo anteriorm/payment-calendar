@@ -6,6 +6,8 @@ use App\Models\Payment;
 use Illuminate\Http\Request;
 use App\Models\Approval;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
+use App\Services\AuditService;
 use Carbon\Carbon;
 
 class PaymentController extends Controller
@@ -48,43 +50,47 @@ class PaymentController extends Controller
             'item_id' => 'required|exists:items,id',
             'purpose' => 'nullable|string',
             'priority' => 'required|in:high,medium,low',
-            'status' => 'sometimes|in:draft,pending,approved,rejected,in_registry,paid',
             'recurring' => 'sometimes|boolean',
             'recurring_frequency' => 'sometimes|in:monthly,weekly,quarterly',
         ]);
 
         $validated['created_by'] = Auth::id();
-        $validated['status'] = $validated['status'] ?? 'draft';
+        $validated['status'] = 'draft';
 
-        $payment = Payment::create($validated);
+        $payment = DB::transaction(function () use ($validated) {
+            $payment = Payment::create($validated);
 
-        // Создаём повторяющиеся платежи на 6 месяцев вперёд
-        if (!empty($validated['recurring']) && !empty($validated['recurring_frequency'])) {
-            $freq = $validated['recurring_frequency'];
-            $date = Carbon::parse($validated['planned_date']);
-            for ($i = 1; $i <= 6; $i++) {
-                $next = match ($freq) {
-                    'weekly' => $date->copy()->addWeeks($i),
-                    'monthly' => $date->copy()->addMonths($i),
-                    'quarterly' => $date->copy()->addMonths($i * 3),
-                };
-                Payment::create([
-                    'amount' => $validated['amount'],
-                    'planned_date' => $next->toDateString(),
-                    'account_id' => $validated['account_id'],
-                    'counterparty_id' => $validated['counterparty_id'],
-                    'item_id' => $validated['item_id'],
-                    'purpose' => ($validated['purpose'] ?? '') . ' (повтор)',
-                    'priority' => $validated['priority'],
-                    'status' => 'draft',
-                    'created_by' => Auth::id(),
-                    'recurring' => true,
-                    'recurring_frequency' => $freq,
-                ]);
+            if (!empty($validated['recurring']) && !empty($validated['recurring_frequency'])) {
+                $freq = $validated['recurring_frequency'];
+                $date = Carbon::parse($validated['planned_date']);
+                for ($i = 1; $i <= 6; $i++) {
+                    $next = match ($freq) {
+                        'weekly' => $date->copy()->addWeeks($i),
+                        'monthly' => $date->copy()->addMonths($i),
+                        'quarterly' => $date->copy()->addMonths($i * 3),
+                    };
+                    Payment::create([
+                        'amount' => $validated['amount'],
+                        'planned_date' => $next->toDateString(),
+                        'account_id' => $validated['account_id'],
+                        'counterparty_id' => $validated['counterparty_id'],
+                        'item_id' => $validated['item_id'],
+                        'purpose' => ($validated['purpose'] ?? '') . ' (повтор)',
+                        'priority' => $validated['priority'],
+                        'status' => 'draft',
+                        'created_by' => Auth::id(),
+                        'recurring' => true,
+                        'recurring_frequency' => $freq,
+                    ]);
+                }
             }
-        }
+
+            return $payment;
+        });
 
         $payment->load(['account', 'counterparty', 'item', 'creator']);
+
+        AuditService::log('payment_created', "Заявка №{$payment->id}", $payment->purpose);
 
         return response()->json($payment, 201);
     }
@@ -97,8 +103,8 @@ class PaymentController extends Controller
 
     public function update(Request $request, Payment $payment)
     {
-        if ($payment->status !== 'draft') {
-            return response()->json(['message' => 'Редактирование разрешено только для черновиков'], 403);
+        if (!in_array($payment->status, ['draft', 'rejected'])) {
+            return response()->json(['message' => 'Редактирование разрешено только для черновиков и отклонённых заявок'], 403);
         }
 
         $validated = $request->validate([
@@ -131,13 +137,15 @@ class PaymentController extends Controller
 
     public function submit(Payment $payment)
     {
-        if ($payment->status !== 'draft') {
-            return response()->json(['message' => 'Только черновик можно отправить'], 403);
+        if (!in_array($payment->status, ['draft', 'rejected'])) {
+            return response()->json(['message' => 'Только черновик или отклонённая заявка может быть отправлена'], 403);
         }
 
         $payment->status = 'pending';
         $payment->save();
         $payment->load(['account', 'counterparty', 'item', 'creator']);
+
+        AuditService::log('payment_submitted', "Заявка №{$payment->id}", 'Отправлена на согласование');
 
         return response()->json(['message' => 'Заявка отправлена на согласование', 'payment' => $payment]);
     }
@@ -164,6 +172,8 @@ class PaymentController extends Controller
 
         $payment->load(['account', 'counterparty', 'item', 'creator']);
 
+        AuditService::log('payment_approved', "Заявка №{$payment->id}", $request->comment);
+
         return response()->json(['message' => 'Заявка утверждена', 'payment' => $payment]);
     }
 
@@ -189,6 +199,8 @@ class PaymentController extends Controller
 
         $payment->load(['account', 'counterparty', 'item', 'creator']);
 
+        AuditService::log('payment_rejected', "Заявка №{$payment->id}", $request->comment);
+
         return response()->json(['message' => 'Заявка отклонена', 'payment' => $payment]);
     }
 
@@ -204,9 +216,12 @@ class PaymentController extends Controller
             return response()->json(['message' => 'Этот платёж нельзя перенести'], 403);
         }
 
+        $oldDate = $payment->planned_date->toDateString();
         $payment->planned_date = $request->planned_date;
         $payment->save();
         $payment->load(['account', 'counterparty', 'item', 'creator']);
+
+        AuditService::log('payment_moved', "Заявка №{$payment->id}", "{$oldDate} → {$request->planned_date}");
 
         return response()->json(['message' => 'Дата платежа изменена', 'payment' => $payment]);
     }

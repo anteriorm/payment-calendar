@@ -5,6 +5,8 @@ namespace App\Http\Controllers;
 use App\Models\Registry;
 use App\Models\Payment;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use App\Services\AuditService;
 
 class RegistryController extends Controller
 {
@@ -55,19 +57,26 @@ class RegistryController extends Controller
             }
         }
 
-        $registry = Registry::create([
-            'registry_date' => $request->registry_date,
-            'status' => 'created',
-            'created_by' => auth()->id(),
-        ]);
+        $registry = DB::transaction(function () use ($request, $payments) {
+            $registry = Registry::create([
+                'registry_date' => $request->registry_date,
+                'status' => 'created',
+                'created_by' => auth()->id(),
+            ]);
 
-        foreach ($payments as $payment) {
-            $payment->registry_id = $registry->id;
-            $payment->status = 'in_registry';
-            $payment->save();
-        }
+            foreach ($payments as $payment) {
+                $payment->registry_id = $registry->id;
+                $payment->status = 'in_registry';
+                $payment->save();
+            }
+
+            return $registry;
+        });
 
         $registry->load(['payments', 'creator', 'approver']);
+
+        AuditService::log('registry_created', "Реестр №{$registry->id}", "Заявок: {$registry->payments->count()}");
+
         return response()->json($this->formatRegistry($registry), 201);
     }
 
@@ -92,20 +101,25 @@ class RegistryController extends Controller
 
     public function pay(Registry $registry)
     {
-        if ($registry->status === 'paid') {
-            return response()->json(['message' => 'Реестр уже оплачен'], 422);
+        if ($registry->status !== 'created') {
+            return response()->json(['message' => 'Оплатить можно только реестр в статусе "created"'], 422);
         }
 
-        $registry->status = 'paid';
-        $registry->approved_by = auth()->id();
-        $registry->save();
+        DB::transaction(function () use ($registry) {
+            $registry->status = 'paid';
+            $registry->approved_by = auth()->id();
+            $registry->save();
 
-        foreach ($registry->payments as $payment) {
-            $payment->status = 'paid';
-            $payment->save();
-        }
+            foreach ($registry->payments as $payment) {
+                $payment->status = 'paid';
+                $payment->save();
+            }
+        });
 
         $registry->load(['payments', 'creator', 'approver']);
+
+        AuditService::log('registry_paid', "Реестр №{$registry->id}", 'Оплачен');
+
         return response()->json(['message' => 'Реестр оплачен', 'registry' => $this->formatRegistry($registry)]);
     }
 
@@ -121,7 +135,7 @@ class RegistryController extends Controller
                 $payment->id,
                 $payment->planned_date,
                 $payment->counterparty->name ?? '',
-                $payment->amount / 100,
+                $payment->amount,
                 $payment->account->name ?? '',
                 $payment->item->name ?? '',
                 $payment->purpose ?? '',

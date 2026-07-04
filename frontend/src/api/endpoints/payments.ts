@@ -90,10 +90,8 @@ const real = {
       purpose: data.purpose,
       priority: data.priority,
     };
-    console.log("📤 Создание платежа, payload:", payload);
     return client.post<ApiPayment>("/payments", payload)
       .then(r => {
-        console.log("📥 Ответ сервера (создание):", r.data);
         return mapApiPayment(r.data);
       });
   },
@@ -108,10 +106,8 @@ const real = {
     if (data.purpose !== undefined) payload.purpose = data.purpose;
     if (data.priority !== undefined) payload.priority = data.priority;
     if (data.status !== undefined) payload.status = data.status;
-    console.log("📤 Обновление платежа, payload:", payload);
     return client.put<ApiPayment>(`/payments/${id}`, payload)
       .then(r => {
-        console.log("📥 Ответ сервера (обновление):", r.data);
         return mapApiPayment(r.data);
       });
   },

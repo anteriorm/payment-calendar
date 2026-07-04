@@ -4,6 +4,8 @@ namespace App\Http\Controllers;
 
 use App\Models\Item;
 use Illuminate\Http\Request;
+use Illuminate\Database\QueryException;
+use App\Services\AuditService;
 
 class ItemController extends Controller
 {
@@ -22,6 +24,9 @@ class ItemController extends Controller
         ]);
 
         $item = Item::create($validated);
+
+        AuditService::log('item_created', "Статья «{$item->name}»");
+
         return response()->json($item, 201);
     }
 
@@ -40,6 +45,9 @@ class ItemController extends Controller
         ]);
 
         $item->update($validated);
+
+        AuditService::log('item_updated', "Статья «{$item->name}»");
+
         return response()->json($item);
     }
 
@@ -49,7 +57,14 @@ class ItemController extends Controller
             return response()->json(['message' => 'Доступ запрещён'], 403);
         }
 
-        $item->delete();
+        try {
+            $name = $item->name;
+            $item->delete();
+            AuditService::log('item_deleted', "Статья «{$name}»");
+        } catch (QueryException $e) {
+            return response()->json(['message' => 'Невозможно удалить статью — на неё ссылаются платежи или поступления'], 422);
+        }
+
         return response()->json(['message' => 'Статья удалена']);
     }
 }

@@ -4,7 +4,8 @@ namespace App\Http\Controllers;
 
 use App\Models\User;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Hash;
+use Illuminate\Database\QueryException;
+
 
 class UserController extends Controller
 {
@@ -16,7 +17,6 @@ class UserController extends Controller
                 'name' => $user->name,
                 'email' => $user->email,
                 'role' => $user->role,
-                'status' => 'active',
             ];
         });
 
@@ -32,8 +32,6 @@ class UserController extends Controller
             'role' => 'required|in:admin,initiator,manager,treasurer',
         ]);
 
-        $validated['password'] = Hash::make($validated['password']);
-
         $user = User::create($validated);
 
         return response()->json([
@@ -41,7 +39,6 @@ class UserController extends Controller
             'name' => $user->name,
             'email' => $user->email,
             'role' => $user->role,
-            'status' => 'active',
         ], 201);
     }
 
@@ -52,7 +49,6 @@ class UserController extends Controller
             'name' => $user->name,
             'email' => $user->email,
             'role' => $user->role,
-            'status' => 'active',
         ]);
     }
 
@@ -65,10 +61,6 @@ class UserController extends Controller
             'role' => 'sometimes|in:admin,initiator,manager,treasurer',
         ]);
 
-        if (isset($validated['password'])) {
-            $validated['password'] = Hash::make($validated['password']);
-        }
-
         $user->update($validated);
 
         return response()->json([
@@ -76,7 +68,6 @@ class UserController extends Controller
             'name' => $user->name,
             'email' => $user->email,
             'role' => $user->role,
-            'status' => 'active',
         ]);
     }
 
@@ -86,7 +77,12 @@ class UserController extends Controller
             return response()->json(['message' => 'Доступ запрещён'], 403);
         }
 
-        $user->delete();
+        try {
+            $user->delete();
+        } catch (QueryException $e) {
+            return response()->json(['message' => 'Невозможно удалить пользователя — на него ссылаются заявки или поступления'], 422);
+        }
+
         return response()->json(['message' => 'Пользователь удалён']);
     }
 }

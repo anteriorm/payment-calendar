@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Income;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use App\Services\AuditService;
 
 class IncomeController extends Controller
 {
@@ -73,6 +74,8 @@ class IncomeController extends Controller
         $income = Income::create($validated);
         $income->load(['account', 'counterparty', 'item']);
 
+        AuditService::log('income_created', "Поступление №{$income->id}", $income->purpose);
+
         return response()->json($this->formatIncome($income), 201);
     }
 
@@ -91,7 +94,6 @@ class IncomeController extends Controller
             'counterparty_id' => 'sometimes|exists:counterparties,id',
             'item_id' => 'sometimes|exists:items,id',
             'purpose' => 'sometimes|nullable|string',
-            'status' => 'sometimes|in:planned,confirmed,received,canceled',
         ]);
 
         $income->update($validated);
@@ -120,6 +122,8 @@ class IncomeController extends Controller
         $income->save();
         $income->load(['account', 'counterparty', 'item', 'creator']);
 
+        AuditService::log('income_confirmed', "Поступление №{$income->id}", 'Подтверждено');
+
         return response()->json(['message' => 'Поступление подтверждено', 'income' => $this->formatIncome($income)]);
     }
 
@@ -133,6 +137,8 @@ class IncomeController extends Controller
         $income->save();
         $income->load(['account', 'counterparty', 'item', 'creator']);
 
+        AuditService::log('income_received', "Поступление №{$income->id}", 'Отмечено как полученное');
+
         return response()->json(['message' => 'Поступление отмечено как полученное', 'income' => $this->formatIncome($income)]);
     }
 
@@ -145,6 +151,8 @@ class IncomeController extends Controller
         $income->status = 'canceled';
         $income->save();
         $income->load(['account', 'counterparty', 'item', 'creator']);
+
+        AuditService::log('income_canceled', "Поступление №{$income->id}", 'Отменено');
 
         return response()->json(['message' => 'Поступление отменено', 'income' => $this->formatIncome($income)]);
     }

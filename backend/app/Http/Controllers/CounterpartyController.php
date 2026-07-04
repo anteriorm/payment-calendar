@@ -4,6 +4,8 @@ namespace App\Http\Controllers;
 
 use App\Models\Counterparty;
 use Illuminate\Http\Request;
+use Illuminate\Database\QueryException;
+use App\Services\AuditService;
 
 class CounterpartyController extends Controller
 {
@@ -42,6 +44,9 @@ class CounterpartyController extends Controller
         ]);
 
         $counterparty = Counterparty::create($validated);
+
+        AuditService::log('counterparty_created', "Контрагент «{$counterparty->name}»");
+
         return response()->json($this->formatCounterparty($counterparty), 201);
     }
 
@@ -64,6 +69,9 @@ class CounterpartyController extends Controller
         ]);
 
         $counterparty->update($validated);
+
+        AuditService::log('counterparty_updated', "Контрагент «{$counterparty->name}»");
+
         return response()->json($this->formatCounterparty($counterparty));
     }
 
@@ -73,7 +81,14 @@ class CounterpartyController extends Controller
             return response()->json(['message' => 'Доступ запрещён'], 403);
         }
 
-        $counterparty->delete();
+        try {
+            $name = $counterparty->name;
+            $counterparty->delete();
+            AuditService::log('counterparty_deleted', "Контрагент «{$name}»");
+        } catch (QueryException $e) {
+            return response()->json(['message' => 'Невозможно удалить контрагента — на него ссылаются платежи или поступления'], 422);
+        }
+
         return response()->json(['message' => 'Контрагент удалён']);
     }
 }
