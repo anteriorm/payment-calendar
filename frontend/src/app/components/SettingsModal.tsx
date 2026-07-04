@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { X, Bell, Globe, Monitor } from "lucide-react";
 import { C, THEMES, applyTheme, currentTheme, type ThemeKey } from "../tokens";
 import { useToast } from "./Toast";
@@ -49,7 +49,7 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
     onClose();
   };
 
-  const Section = ({ title, children }: { title: string; children: React.ReactNode }) => (
+  const Section = ({ title, children }: { title: string; children: ReactNode }) => (
     <div style={{ marginBottom: 24 }}>
       <h3 style={{ fontSize: 12, fontWeight: 600, color: C.textLt, textTransform: "uppercase", letterSpacing: 0.6, margin: "0 0 14px" }}>
         {title}
@@ -58,7 +58,7 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
     </div>
   );
 
-  const Row = ({ label, sub, children }: { label: string; sub?: string; children: React.ReactNode }) => (
+  const Row = ({ label, sub, children }: { label: string; sub?: string; children: ReactNode }) => (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 0", borderBottom: `1px solid rgba(192,192,160,0.30)` }}>
       <div>
         <div style={{ fontSize: 13, color: C.textDk }}>{label}</div>

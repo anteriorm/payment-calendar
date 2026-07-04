@@ -1,6 +1,7 @@
+import { type ComponentType } from "react";
 import {
   LayoutDashboard, Calendar, ClipboardList, ArrowUpCircle,
-  FileText, BarChart2, Settings, LogOut, ShieldCheck,
+  FileText, BarChart2, Settings, LogOut, ShieldCheck, RefreshCw,
 } from "lucide-react";
 import { C } from "../tokens";
 import { useAuth, type Screen } from "../context/AuthContext";
@@ -13,10 +14,11 @@ interface SidebarProps {
   allowedScreens: Screen[];
 }
 
-const ALL_NAV_ITEMS: { id: Screen; Icon: React.ComponentType<{ size: number }>; label: string; dividerAfter?: boolean }[] = [
+const ALL_NAV_ITEMS: { id: Screen; Icon: ComponentType<{ size: number }>; label: string; dividerAfter?: boolean }[] = [
   { id: "dashboard",  Icon: LayoutDashboard, label: "Главная",          dividerAfter: true },
   { id: "calendar",   Icon: Calendar,        label: "Календарь"         },
   { id: "requests",   Icon: ClipboardList,   label: "Заявки на платёж"  },
+  { id: "recurring",  Icon: RefreshCw,       label: "Повторяющиеся"     },
   { id: "income",     Icon: ArrowUpCircle,   label: "Поступления"       },
   { id: "registry",   Icon: FileText,        label: "Реестр платежей"   },
   { id: "reports",    Icon: BarChart2,       label: "Отчёты"            },

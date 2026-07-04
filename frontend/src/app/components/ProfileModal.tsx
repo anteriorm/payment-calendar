@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type CSSProperties } from "react";
 import { X, Camera } from "lucide-react";
 import { C } from "../tokens";
 import { useAuth, ROLE_LABELS } from "../context/AuthContext";
@@ -23,7 +23,7 @@ export function ProfileModal({ onClose }: ProfileModalProps) {
 
   if (!user) return null;
 
-  const inp = (field: string): React.CSSProperties => ({
+  const inp = (field: string): CSSProperties => ({
     width: "100%",
     padding: "9px 12px",
     borderRadius: 6,

@@ -4,7 +4,7 @@ import { HTML5Backend } from "react-dnd-html5-backend";
 import { TopBar } from "./components/TopBar";
 import { Sidebar } from "./components/Sidebar";
 import { PaymentCalendar, type SelectedCell } from "./components/PaymentCalendar";
-import { CreateRequestModal } from "./components/CreateRequestModal";
+import { CreateRequestModal, type ModalRequestData } from "./components/CreateRequestModal";
 import { RequestDrawer } from "./components/RequestDrawer";
 import { PaymentRegistry } from "./components/PaymentRegistry";
 import { References } from "./components/References";
@@ -13,16 +13,19 @@ import { Income } from "./components/Income";
 import { Reports } from "./components/Reports";
 import { DashboardScreen } from "./components/DashboardScreen";
 import { AuditScreen } from "./components/AuditScreen";
-import { ToastProvider } from "./components/Toast";
+import { RecurringPayments } from "./components/RecurringPayments";
+import { ToastProvider, useToast } from "./components/Toast";
 import { LoginScreen } from "./components/LoginScreen";
 import { ProfileModal } from "./components/ProfileModal";
 import { SettingsModal } from "./components/SettingsModal";
 import { AuthProvider, useAuth, ROLE_SCREENS, type Screen } from "./context/AuthContext";
+import * as api from "../api";
 
 const SCREEN_TITLES: Record<Screen, string> = {
   dashboard:  "Главная",
   calendar:   "Платёжный календарь",
   requests:   "Заявки на платёж",
+  recurring:  "Повторяющиеся платежи",
   income:     "Поступления",
   registry:   "Реестр платежей",
   reports:    "Отчёты",
@@ -31,17 +34,56 @@ const SCREEN_TITLES: Record<Screen, string> = {
 };
 
 function AppShell() {
-  const { isAuthed, initializing, user, perms } = useAuth();
+  const { isAuthed, user, perms } = useAuth();
+  const { showToast } = useToast();
 
   const [screen,            setScreen]            = useState<Screen>("dashboard");
   const [showModal,         setShowModal]          = useState(false);
   const [showDrawer,        setShowDrawer]         = useState(false);
   const [drawerCell,        setDrawerCell]         = useState<SelectedCell | null>(null);
+  const [drawerPaymentId,   setDrawerPaymentId]    = useState<number>(2847);
   const [showProfile,       setShowProfile]        = useState(false);
   const [showSettings,      setShowSettings]       = useState(false);
-  const [paidConfirmations, setPaidConfirmations]  = useState<{ dateStr: string; amount: number }[]>([]);
+  const [paidConfirmations,   setPaidConfirmations]  = useState<{ dateStr: string; amount: number }[]>([]);
+  const [requestsRefreshKey,  setRequestsRefreshKey]  = useState(0);
 
   const rescheduleRef = useRef<((from: string, to: string, amount: number, accKey?: string) => void) | null>(null);
+
+  // When a new request is created via the global modal: persist to API store + start route
+  async function handleCreateRequestSave(data: ModalRequestData, asDraft: boolean) {
+    setShowModal(false);
+    try {
+      // Create the payment in the mock payments store
+      const created = await api.payments.create({
+        planned_date:     data.date ?? "2026-07-02",
+        account_id:       1,
+        account_name:     data.account ?? "Расчётный №1",
+        counterparty_id:  1,
+        counterparty:     data.counterparty ?? "",
+        item_id:          1,
+        item:             data.article ?? "",
+        amount:           Math.round(parseFloat((data.amount ?? "0").replace(/\s/g, "").replace(",", ".")) * 100),
+        priority:         (data.priority ?? "medium") as "high" | "medium" | "low",
+        purpose:          data.purpose ?? "",
+        created_by:       "Иванова М.С.",
+        created_at:       new Date().toISOString(),
+      } as any);
+
+      // Start approval route if sending (not draft) and route selected
+      if (!asDraft && data.routeId && (created as any)?.id) {
+        await api.approvals.startRoute((created as any).id, data.routeId);
+        const route = await api.approvals.getRoutes();
+        const routeName = (route as any[]).find(r => r.id === data.routeId)?.name ?? "Стандартный";
+        showToast(`Заявка создана. Маршрут «${routeName}» запущен`, "success");
+      } else {
+        showToast(asDraft ? "Черновик сохранён" : "Заявка создана", asDraft ? "warning" : "success");
+      }
+    } catch {
+      showToast("Ошибка при создании заявки", "error");
+    }
+    // Trigger reload in PaymentRequests so the new payment appears
+    setRequestsRefreshKey(k => k + 1);
+  }
 
   // If role changes and current screen is not allowed → redirect to first allowed screen
   const allowedScreens = user ? ROLE_SCREENS[user.role] : [];
@@ -50,14 +92,6 @@ function AppShell() {
   const handleScreenChange = (s: Screen) => {
     if (allowedScreens.includes(s)) { setScreen(s); setShowDrawer(false); }
   };
-
-  if (initializing) {
-    return (
-      <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "Inter, sans-serif", color: "#555540" }}>
-        Загрузка…
-      </div>
-    );
-  }
 
   if (!isAuthed) return <LoginScreen />;
 
@@ -87,7 +121,7 @@ function AppShell() {
           {currentScreen === "calendar" && (
             <PaymentCalendar
               onCreateRequest={perms.canCreateRequest ? () => setShowModal(true) : undefined}
-              onSelectRequest={(cell) => { setDrawerCell(cell); setShowDrawer(true); }}
+              onSelectRequest={(cell) => { setDrawerCell(cell); setDrawerPaymentId(2847); setShowDrawer(true); }}
               onGoToRegistry={perms.canFormRegistry ? () => setScreen("registry") : undefined}
               onRescheduleReady={(fn) => { rescheduleRef.current = fn; }}
               paidConfirmations={paidConfirmations}
@@ -96,7 +130,22 @@ function AppShell() {
           )}
 
           {currentScreen === "requests" && (
-            <PaymentRequests onCreateRequest={perms.canCreateRequest ? () => setShowModal(true) : undefined} />
+            <PaymentRequests
+              onCreateRequest={perms.canCreateRequest ? () => setShowModal(true) : undefined}
+              refreshKey={requestsRefreshKey}
+              onOpenDetails={(paymentId) => {
+                setDrawerPaymentId(paymentId);
+                setDrawerCell(null);
+                setShowDrawer(true);
+              }}
+            />
+          )}
+
+          {currentScreen === "recurring" && (
+            <RecurringPayments
+              canCreate={perms.canCreateRequest}
+              canOperate={perms.canCreateRequest || perms.canReschedule}
+            />
           )}
 
           {currentScreen === "income" && <Income canCreate={perms.canCreateRequest} />}
@@ -131,21 +180,20 @@ function AppShell() {
               isCashGap={drawerCell?.isCashGap}
               deficitAmount={drawerCell?.deficitAmount}
               paymentAccKey={drawerCell?.accKey ?? "acc1"}
-              cellDate={drawerCell?.cellDate}
-              cellIncome={drawerCell?.cellIncome}
-              cellExpense={drawerCell?.cellExpense}
-              cellBalance={drawerCell?.cellBalance}
-              cellAccountName={drawerCell?.cellAccountName}
+              initialPaymentDate={drawerCell?.clickedDateStr}
+              initialExpense={drawerCell?.cellExpense}
               onReschedule={perms.canReschedule
                 ? (from, to, amount, accKey) => rescheduleRef.current?.(from, to, amount, accKey)
                 : undefined}
               canApprove={perms.canApprove}
+              paymentId={drawerPaymentId}
+              onApprovalChanged={() => setRequestsRefreshKey(k => k + 1)}
             />
           )}
         </main>
       </div>
 
-      {showModal && <CreateRequestModal onClose={() => setShowModal(false)} />}
+      {showModal && <CreateRequestModal onClose={() => setShowModal(false)} onSave={handleCreateRequestSave} />}
       {showProfile  && <ProfileModal  onClose={() => setShowProfile(false)}  />}
       {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
     </div>
