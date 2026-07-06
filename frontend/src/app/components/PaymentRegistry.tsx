@@ -1,11 +1,10 @@
 import { useState, useEffect, type ReactNode } from "react";
-import { TableSkeleton, TableError } from "./TableSkeleton";
 import { RegistryDetailModal } from "./RegistryDetailModal";
 import * as api from "../../api";
 import { BarChart2, Plus, Pencil, Trash2, Search, X, ExternalLink, Calendar, AlertTriangle } from "lucide-react";
 import { useToast } from "./Toast";
 import { C } from "../tokens";
-import { exportCsv, getAccountCurrency, formatAmount } from "../utils";
+import { exportCsv, formatRub } from "../utils";
 
 type Priority = "high" | "medium" | "low";
 type RowStatus = "registry" | "paid" | "no_funds";
@@ -21,14 +20,6 @@ interface RegistryRow {
   status:       RowStatus;
 }
 
-const INITIAL_ROWS: RegistryRow[] = [
-  { id: 2845, counterparty: "ООО Поставщик Альфа", article: "Аренда офиса",        amount: 420000, account: "Расчётный счёт №1", date: "25.06.2026", priority: "high",   status: "registry" },
-  { id: 2846, counterparty: "ИП Смирнов А.В.",     article: "Заработная плата",    amount: 560000, account: "Расчётный счёт №1", date: "28.06.2026", priority: "high",   status: "registry" },
-  { id: 2841, counterparty: "АО ТехСервис",        article: "Расходные материалы", amount: 187500, account: "Расчётный счёт №2", date: "24.06.2026", priority: "low",    status: "paid"     },
-  { id: 2842, counterparty: "ООО РентаГрупп",      article: "Услуги подрядчиков",  amount: 95000,  account: "Касса",             date: "26.06.2026", priority: "medium", status: "paid"     },
-  { id: 2847, counterparty: "ПАО Энергоресурс",    article: "Налоги и сборы",      amount: 260000, account: "Расчётный счёт №2", date: "27.06.2026", priority: "medium", status: "no_funds" },
-];
-
 interface AvailableRequest {
   id:           number;
   counterparty: string;
@@ -38,23 +29,12 @@ interface AvailableRequest {
   priority:     Priority;
 }
 
-const AVAILABLE: AvailableRequest[] = [
-  { id: 2843, counterparty: "ООО ТехСервис",       article: "Услуги подрядчиков", amount: 85000,  date: "20.06.2026", priority: "medium" },
-  { id: 2844, counterparty: "ИП Смирнов А.В.",     article: "Аренда",             amount: 45000,  date: "22.06.2026", priority: "high"   },
-  { id: 2848, counterparty: "ПАО Энергоресурс",    article: "Консалтинг",         amount: 95000,  date: "15.06.2026", priority: "medium" },
-  { id: 2850, counterparty: "ООО Альфа-Строй",     article: "Аренда офиса",       amount: 120000, date: "30.06.2026", priority: "low"    },
-  { id: 2851, counterparty: "ЗАО МедиаГрупп",      article: "Реклама",            amount: 38000,  date: "28.06.2026", priority: "low"    },
-];
-
-function fmtFull(n: number, account = ""): string {
-  const currency = getAccountCurrency(account);
-  const rub = n / 100;
-  const prefix = rub < 0 ? "−" : "";
-  return prefix + formatAmount(Math.abs(rub), currency);
+function fmtFull(n: number): string {
+  return formatRub(n);
 }
 
-function fmtShort(n: number, account = ""): string {
-  return formatAmount(n / 100, getAccountCurrency(account));
+function fmtShort(n: number): string {
+  return formatRub(n);
 }
 
 const STATUS_CFG: Record<RowStatus, { label: string; bg: string; color: string }> = {
@@ -85,9 +65,11 @@ export function PaymentRegistry({
   const [rows,             setRows]           = useState<RegistryRow[]>([]);
   const [loading,          setLoading]         = useState(true);
   const [loadError,        setLoadError]       = useState<string | null>(null);
-  const [registryDate,     setRegistryDate]    = useState("18.06.2026");
+  const [registryId,       setRegistryId]      = useState<number | null>(null);
+  const [registryDate,     setRegistryDate]    = useState("");
   const [editingDate,      setEditingDate]     = useState(false);
   const [availableBalance, setAvailableBalance]= useState<number>(0);
+  const [availablePayments, setAvailablePayments]= useState<AvailableRequest[]>([]);
 
   const loadData = () => {
     setLoading(true); setLoadError(null);
@@ -95,8 +77,9 @@ export function PaymentRegistry({
       .then(data => {
         const registries = data as any[];
         if (registries.length > 0) {
-          // Load the latest registry's details
           const latest = registries[0];
+          setRegistryId(latest.id);
+          setRegistryDate(latest.registry_date ?? '');
           api.registries.getOne(latest.id)
             .then(detail => {
               const payments = (detail as any).payments ?? [];
@@ -108,12 +91,13 @@ export function PaymentRegistry({
                 account: p.account ?? '',
                 date: p.date ?? '',
                 priority: p.priority ?? 'medium',
-                status: p.status === 'paid' ? 'paid' as RowStatus : p.status === 'in_registry' ? 'registry' as RowStatus : 'registry' as RowStatus,
+                status: p.status === 'paid' ? 'paid' as RowStatus : 'registry' as RowStatus,
               })));
             })
             .catch(() => setRows([]))
             .finally(() => setLoading(false));
         } else {
+          setRegistryId(null);
           setRows([]);
           setLoading(false);
         }
@@ -122,19 +106,34 @@ export function PaymentRegistry({
   };
   useEffect(() => { loadData(); }, []);
 
-  // Load RUB account balances for "Доступный остаток" card
+  // Load RUB account balances for "Доступный остаток" card (в копейках)
   useEffect(() => {
     api.accounts.getAll().then(accounts => {
       const rubBalance = (accounts as any[])
         .filter((a: any) => a.currency === "RUB")
-        .reduce((s: number, a: any) => s + (a.current ?? 0) / 100, 0);
+        .reduce((s: number, a: any) => s + (a.current ?? 0), 0);
       setAvailableBalance(rubBalance);
-    }).catch(() => setAvailableBalance(992500)); // fallback
+    }).catch(() => setAvailableBalance(99250000));
   }, []);
 
-  // Computed summary values — rows.amount в копейках, конвертируем в рубли для сравнения
-  const totalToPay   = rows.filter(r => r.status !== "paid").reduce((s, r) => s + r.amount, 0) / 100;
-  const totalAll     = rows.reduce((s, r) => s + r.amount, 0) / 100;
+  // Load approved payments not in any registry
+  useEffect(() => {
+    api.payments.getAll({ status: 'approved' }).then(data => {
+      const payments = (data as any[]).filter((p: any) => !p.registry_id);
+      setAvailablePayments(payments.map((p: any) => ({
+        id: p.id,
+        counterparty: p.counterparty ?? '',
+        article: p.item ?? '',
+        amount: p.amount ?? 0,
+        date: p.planned_date ?? '',
+        priority: p.priority ?? 'medium',
+      })));
+    }).catch(() => setAvailablePayments([]));
+  }, []);
+
+  // Computed summary values — всё в копейках
+  const totalToPay   = rows.filter(r => r.status !== "paid").reduce((s, r) => s + r.amount, 0);
+  const totalAll     = rows.reduce((s, r) => s + r.amount, 0);
   const deficit      = totalToPay > availableBalance ? totalToPay - availableBalance : 0;
   const [selected,     setSelected]    = useState<Set<number>>(new Set());
   const [hovered,      setHovered]     = useState<number | null>(null);
@@ -154,16 +153,15 @@ export function PaymentRegistry({
     setSelected(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
 
   const markAsPaid = async () => {
-    if (selCount === 0) return;
+    if (selCount === 0 || !registryId) return;
     const paidRows = rows.filter(r => selected.has(r.id) && r.status !== "paid");
     if (paidRows.length === 0) return;
     try {
-      // Находим реестр и оплачиваем через API
-      const registries = await api.registries.getAll() as any[];
-      if (registries.length > 0) {
-        await api.registries.pay(registries[0].id);
-        setRows(prev => prev.map(r => selected.has(r.id) ? { ...r, status: "paid" as RowStatus } : r));
-        showToast(`${paidRows.length} заявок отмечено оплаченными`, "success");
+      await api.registries.pay(registryId);
+      setRows(prev => prev.map(r => ({ ...r, status: "paid" as RowStatus })));
+      showToast(`Реестр оплачен (${paidRows.length} заявок)`, "success");
+      if (onPaymentsPaid) {
+        onPaymentsPaid(paidRows.map(r => ({ dateStr: r.date, amount: r.amount })));
       }
     } catch {
       showToast("Ошибка оплаты реестра", "error");
@@ -191,20 +189,15 @@ export function PaymentRegistry({
     showToast(`Реестр_${registryDate.replace(/\./g, "-")}.csv скачан (${toExport.length} строк)`, "success");
   };
 
-  const handleAddFromModal = (ids: number[]) => {
-    const newRows: RegistryRow[] = AVAILABLE
-      .filter(r => ids.includes(r.id))
-      .map(r => ({
-        id:           r.id,
-        counterparty: r.counterparty,
-        article:      r.article,
-        amount:       r.amount,
-        account:      "Расчётный счёт №1",
-        priority:     r.priority,
-        status:       "registry" as RowStatus,
-      }));
-    setRows(prev => [...prev, ...newRows]);
-    showToast(`${newRows.length} заявок добавлено в реестр`, "success");
+  const handleAddFromModal = async (ids: number[]) => {
+    try {
+      const today = new Date().toISOString().split('T')[0];
+      await api.registries.create({ registry_date: today, payment_ids: ids });
+      showToast(`${ids.length} заявок добавлено в реестр`, "success");
+      loadData();
+    } catch {
+      showToast("Ошибка создания реестра", "error");
+    }
     setShowAddModal(false);
   };
 
@@ -422,7 +415,7 @@ export function PaymentRegistry({
       {/* ── Add to registry modal ── */}
       {showAddModal && (
         <AddToRegistryModal
-          available={AVAILABLE.filter(r => !rows.find(row => row.id === r.id))}
+          available={availablePayments.filter(r => !rows.find(row => row.id === r.id))}
           onClose={() => setShowAddModal(false)}
           onAdd={handleAddFromModal}
           fmtShort={fmtShort}

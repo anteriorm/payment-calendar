@@ -13,6 +13,7 @@ class AuditLog extends Model
         'action',
         'object',
         'details',
+        'created_at',
     ];
 
     protected $casts = [

@@ -14,6 +14,7 @@ class AuditService
             'action' => $action,
             'object' => $object,
             'details' => $details,
+            'created_at' => now(),
         ]);
     }
 }

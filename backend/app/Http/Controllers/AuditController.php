@@ -32,12 +32,20 @@ class AuditController extends Controller
         $perPage = $request->integer('per_page', 20);
         $logs = $query->paginate($perPage);
 
-        $data = $logs->map(function ($log) {
+        $roleLabels = [
+            'initiator' => 'Инициатор',
+            'treasurer' => 'Казначей',
+            'manager'   => 'Руководитель',
+            'admin'     => 'Администратор',
+        ];
+
+        $data = $logs->map(function ($log) use ($roleLabels) {
+            $role = $log->user?->role ?? '—';
             return [
                 'id' => $log->id,
                 'timestamp' => $log->created_at->format('Y-m-d H:i:s'),
                 'user_name' => $log->user?->name ?? 'Система',
-                'user_role' => $log->user?->role ?? '—',
+                'user_role' => $roleLabels[$role] ?? $role,
                 'action' => $log->action,
                 'object' => $log->object,
                 'details' => $log->details ?? '',

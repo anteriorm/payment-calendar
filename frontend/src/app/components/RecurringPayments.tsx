@@ -37,6 +37,7 @@ const PRIORITY_DOT: Record<string, string> = { high: C.danger, medium: C.beige, 
 const COLS = "36px minmax(130px,1fr) 98px 78px 92px 98px 112px 80px 158px";
 
 const FREQ_OPTIONS: { value: RecurringFrequency; label: string }[] = [
+  { value: "daily",     label: "Ежедневно"      },
   { value: "weekly",    label: "Еженедельно"    },
   { value: "monthly",   label: "Ежемесячно"     },
   { value: "quarterly", label: "Ежеквартально"  },
@@ -87,7 +88,8 @@ function formatDate(iso: string): string {
 }
 
 function daysUntil(isoDate: string): number {
-  const today = new Date("2026-07-02");
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
   return Math.round((new Date(isoDate).getTime() - today.getTime()) / 86400000);
 }
 
@@ -158,12 +160,12 @@ export function RecurringPayments({ canCreate = false, canOperate = false }: Rec
   async function handlePauseResume(id: number, status: RecurringStatus) {
     try {
       if (status === "active") {
-        await api.recurring.pause(id);
-        setRows(rs => rs.map(r => r.id === id ? { ...r, status: "paused" } : r));
+        const updated = await api.recurring.pause(id) as RecurringTemplate;
+        setRows(rs => rs.map(r => r.id === id ? updated : r));
         showToast("Шаблон приостановлен", "warning");
       } else {
-        await api.recurring.resume(id);
-        setRows(rs => rs.map(r => r.id === id ? { ...r, status: "active" } : r));
+        const updated = await api.recurring.resume(id) as RecurringTemplate;
+        setRows(rs => rs.map(r => r.id === id ? updated : r));
         showToast("Шаблон возобновлён", "success");
       }
     } catch { showToast("Ошибка при изменении статуса", "error"); }
@@ -182,7 +184,9 @@ export function RecurringPayments({ canCreate = false, canOperate = false }: Rec
   async function handleGenerate(id: number) {
     try {
       await api.recurring.generate(id);
-      setRows(rs => rs.map(r => r.id === id ? { ...r, last_created: r.next_date, created_count: r.created_count + 1 } : r));
+      // Reload all templates to get updated next_date and created_count from backend
+      const data = await api.recurring.getAll() as RecurringTemplate[];
+      setRows(data);
       showToast("Черновик платежа создан — откройте «Заявки на платёж»", "success");
     } catch { showToast("Ошибка при создании платежа", "error"); }
   }
@@ -217,8 +221,8 @@ export function RecurringPayments({ canCreate = false, canOperate = false }: Rec
         showToast("Шаблон создан", "success");
       } else {
         const t = formModal as RecurringTemplate;
-        await api.recurring.update(t.id, payload);
-        setRows(rs => rs.map(r => r.id === t.id ? { ...r, ...payload } : r));
+        const updated = await api.recurring.update(t.id, payload) as RecurringTemplate;
+        setRows(rs => rs.map(r => r.id === t.id ? updated : r));
         showToast("Шаблон обновлён", "success");
       }
       setFormModal(null);

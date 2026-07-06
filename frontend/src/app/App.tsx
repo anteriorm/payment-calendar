@@ -148,7 +148,7 @@ function AppShell() {
             />
           )}
 
-          {currentScreen === "income" && <Income canCreate={perms.canCreateRequest} />}
+          {currentScreen === "income" && <Income canCreate={perms.canCreateIncome} />}
 
           {currentScreen === "registry" && (
             <div style={{ flex: 1, overflowY: "auto" }}>

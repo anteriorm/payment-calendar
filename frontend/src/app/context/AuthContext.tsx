@@ -39,13 +39,14 @@ export interface Permissions {
   canMarkPaid: boolean;
   canManageRefs: boolean;
   canCreateRequest: boolean;
+  canCreateIncome: boolean;
 }
 
 export const ROLE_PERMS: Record<Role, Permissions> = {
-  initiator: { canApprove: false, canReschedule: false, canFormRegistry: false, canMarkPaid: false, canManageRefs: false, canCreateRequest: true  },
-  treasurer: { canApprove: false, canReschedule: true,  canFormRegistry: true,  canMarkPaid: true,  canManageRefs: false, canCreateRequest: false },
-  manager:   { canApprove: true,  canReschedule: false, canFormRegistry: false, canMarkPaid: false, canManageRefs: false, canCreateRequest: false },
-  admin:     { canApprove: true,  canReschedule: true,  canFormRegistry: true,  canMarkPaid: true,  canManageRefs: true,  canCreateRequest: true  },
+  initiator: { canApprove: false, canReschedule: false, canFormRegistry: false, canMarkPaid: false, canManageRefs: false, canCreateRequest: true,  canCreateIncome: false },
+  treasurer: { canApprove: false, canReschedule: true,  canFormRegistry: true,  canMarkPaid: true,  canManageRefs: false, canCreateRequest: false, canCreateIncome: true  },
+  manager:   { canApprove: true,  canReschedule: false, canFormRegistry: false, canMarkPaid: false, canManageRefs: false, canCreateRequest: false, canCreateIncome: false },
+  admin:     { canApprove: true,  canReschedule: true,  canFormRegistry: true,  canMarkPaid: true,  canManageRefs: true,  canCreateRequest: true,  canCreateIncome: true  },
 };
 
 interface AuthContextType {
@@ -60,7 +61,7 @@ interface AuthContextType {
 
 const EMPTY_PERMS: Permissions = {
   canApprove: false, canReschedule: false, canFormRegistry: false,
-  canMarkPaid: false, canManageRefs: false, canCreateRequest: false,
+  canMarkPaid: false, canManageRefs: false, canCreateRequest: false, canCreateIncome: false,
 };
 
 const AuthContext = createContext<AuthContextType>({

@@ -12,6 +12,8 @@ class Payment extends Model
     protected $fillable = [
         'amount',
         'planned_date',
+        'next_date',
+        'end_date',
         'account_id',
         'counterparty_id',
         'item_id',
@@ -20,6 +22,9 @@ class Payment extends Model
         'recurring_frequency',
         'priority',
         'status',
+        'template_status',
+        'created_count',
+        'last_created',
         'created_by',
         'registry_id',
     ];
@@ -27,7 +32,11 @@ class Payment extends Model
     protected $casts = [
         'amount' => 'integer',
         'planned_date' => 'date',
+        'next_date' => 'date',
+        'end_date' => 'date',
+        'last_created' => 'date',
         'recurring' => 'boolean',
+        'created_count' => 'integer',
     ];
 
     public function account()

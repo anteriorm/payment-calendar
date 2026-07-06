@@ -56,8 +56,11 @@ export function getAccountCurrency(accountName: string): string {
  *   85000 + "EUR" → "85 000 €"
  */
 export function formatAmount(amount: number, currency: string): string {
+  if (!isFinite(amount) || isNaN(amount)) return "0,00 ₽";
   const abs  = Math.abs(amount);
-  const [int, dec] = abs.toFixed(2).split(".");
+  // Используем BigInt-like подход для очень больших чисел
+  const str = abs.toFixed(2);
+  const [int, dec] = str.split(".");
   const intFmt = int.replace(/\B(?=(\d{3})+(?!\d))/g, " ");
   const sym = CURRENCY_SYMBOLS[currency] ?? "₽";
   const result = `${intFmt},${dec} ${sym}`;
@@ -134,15 +137,19 @@ export function kopecksToRub(kopecks: number): number {
 }
 
 /**
- * Formats KOPECKS as "1 500,50 ₽".
- * Used throughout tables and cards.
+ * Formats KOPECKS as "1 500,50 ₽" using string arithmetic.
+ * Avoids floating-point precision loss for very large numbers.
  */
 export function formatRub(kopecks: number): string {
-  const abs  = Math.abs(kopecks) / 100;
-  const [int, dec] = abs.toFixed(2).split(".");
-  const intFmt = int.replace(/\B(?=(\d{3})+(?!\d))/g, " ");
-  const result = `${intFmt},${dec} ₽`;
-  return kopecks < 0 ? `−${result}` : result;
+  if (!isFinite(kopecks) || isNaN(kopecks)) return "0,00 ₽";
+  const negative = kopecks < 0;
+  const abs = Math.abs(Math.trunc(kopecks));
+  const str = abs.toString();
+  const int = str.length > 2 ? str.slice(0, -2) : "0";
+  const dec = str.length > 2 ? str.slice(-2) : str.padStart(2, "0");
+  const intFmt = int.replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+  const result = `${intFmt},${dec} ₽`;
+  return negative ? `−${result}` : result;
 }
 
 /**

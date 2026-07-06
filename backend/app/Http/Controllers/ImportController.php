@@ -6,6 +6,7 @@ use Illuminate\Http\Request;
 use App\Models\Payment;
 use App\Models\Income;
 use Illuminate\Support\Facades\Auth;
+use App\Services\AuditService;
 
 class ImportController extends Controller
 {
@@ -83,6 +84,10 @@ class ImportController extends Controller
 
         fclose($handle);
 
+        if ($imported > 0) {
+            AuditService::log('import_payments', "Импорт заявок", "Импортировано: $imported");
+        }
+
         return response()->json([
             'message' => "Импортировано $imported заявок",
             'imported' => $imported,
@@ -155,6 +160,10 @@ class ImportController extends Controller
         }
 
         fclose($handle);
+
+        if ($imported > 0) {
+            AuditService::log('import_incomes', "Импорт поступлений", "Импортировано: $imported");
+        }
 
         return response()->json([
             'message' => "Импортировано $imported поступлений",

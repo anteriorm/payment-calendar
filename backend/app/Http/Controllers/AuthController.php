@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use App\Models\User;
+use App\Services\AuditService;
 
 class AuthController extends Controller
 {
@@ -25,6 +26,8 @@ class AuthController extends Controller
         }
 
         $token = $user->createToken("api-token")->plainTextToken;
+
+        AuditService::log('user_login', $user->name, "Вход в систему");
 
         return response()->json([
             "token" => $token,

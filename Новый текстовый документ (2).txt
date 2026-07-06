@@ -1,4 +1,1 @@
-Failed to load resource: the server responded with a status of 500 (Internal Server Error)
-:5173/favicon.ico:1  Failed to load resource: the server responded with a status of 404 (Not Found)
-:5173/api/login:1  Failed to load resource: the server responded with a status of 500 (Internal Server Error)
-:5173/api/dashboard:1  Failed to load resource: the server responded with a status of 500 (Internal Server Error)
+Исправь роли, а то сейчас функционал неправильный, посмотри тз, которое я тебе скидывал в прошлых запросах и реализуй, у меня в проекте всё есть

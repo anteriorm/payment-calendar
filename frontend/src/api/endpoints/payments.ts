@@ -40,18 +40,35 @@ interface ApiPayment {
 
 /** Map API response → Payment. Amount stays in kopecks (no conversion). */
 function mapApiPayment(api: ApiPayment): Payment {
-  const accountId = api.account?.id ?? api.account_id ?? 0;
-  const accountName = api.account?.name ?? api.account_name ?? "";
-  const counterpartyId = api.counterparty?.id ?? api.counterparty_id ?? 0;
-  const counterpartyName = api.counterparty?.name ?? api.counterparty_name ?? "";
-  const itemId = api.item?.id ?? api.item_id ?? 0;
-  const itemName = api.item?.name ?? api.item_name ?? "";
-  const createdById = api.created_by?.id ?? api.created_by_id ?? 0;
-  const createdByName = api.created_by?.name ?? api.created_by_name ?? "";
+  // Бэкенд может вернуть counterparty как объект {id, name} или как строку имени
+  const counterpartyName = typeof api.counterparty === 'string'
+    ? api.counterparty
+    : api.counterparty?.name ?? api.counterparty_name ?? "";
+  const counterpartyId = typeof api.counterparty === 'object'
+    ? (api.counterparty?.id ?? api.counterparty_id ?? 0)
+    : (api.counterparty_id ?? 0);
+  const itemName = typeof api.item === 'string'
+    ? api.item
+    : api.item?.name ?? api.item_name ?? "";
+  const itemId = typeof api.item === 'object'
+    ? (api.item?.id ?? api.item_id ?? 0)
+    : (api.item_id ?? 0);
+  const accountName = typeof api.account === 'string'
+    ? api.account
+    : api.account?.name ?? api.account_name ?? "";
+  const accountId = typeof api.account === 'object'
+    ? (api.account?.id ?? api.account_id ?? 0)
+    : (api.account_id ?? 0);
+  const createdByName = typeof api.created_by === 'string'
+    ? api.created_by
+    : api.created_by?.name ?? api.created_by_name ?? "";
+  const createdById = typeof api.created_by === 'object'
+    ? (api.created_by?.id ?? api.created_by_id ?? 0)
+    : (api.created_by_id ?? 0);
 
   return {
     id: api.id,
-    amount: api.amount,          // kopecks — conversion happens in the component
+    amount: api.amount,
     planned_date: api.planned_date,
     account_id: accountId,
     account_name: accountName,

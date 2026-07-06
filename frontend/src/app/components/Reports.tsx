@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, type ReactElement } from "react";
 import { BarChart2, AlertTriangle, ArrowUpRight, Calendar, ChevronDown, Download } from "lucide-react";
 import { useToast } from "./Toast";
 import { C } from "../tokens";
-import { exportCsv, formatAmount, getAccountCurrency } from "../utils";
+import { exportCsv, formatRub } from "../utils";
 import * as api from "../../api";
 
 type TabId = "cashgaps" | "balances" | "planfact" | "exports";
@@ -23,136 +23,9 @@ interface CashGap {
   date: string; account: string; deficit: number;
   topPayer: string; topAmount: number;
 }
-const CASH_GAPS: CashGap[] = [
-  { date: "28 мая 2026",  account: "Расчётный счёт №2",             deficit: -95000,  topPayer: "ООО РентаГрупп",   topAmount: 150000 },
-  { date: "24 июня 2026", account: "Расчётный счёт №1, №2, Касса", deficit: -270000, topPayer: "ООО ТехСервис",    topAmount: 220000 },
-  { date: "27 июня 2026", account: "Расчётный счёт №1, №2",        deficit: -240000, topPayer: "ИП Смирнов А.В.",  topAmount: 180000 },
-  { date: "29 июня 2026", account: "Расчётный счёт №2, Касса",     deficit: -85000,  topPayer: "АО ТехСервис",     topAmount: 95000  },
-];
 
 interface BalanceRow {
   name: string; opening: number; income: number; expense: number; closing: number; isTotal?: boolean;
-}
-// Mock balance snapshots for different periods
-const BALANCE_SNAPSHOTS: Record<string, BalanceRow[]> = {
-  "week": [
-    { name: "Расчётный счёт №1", opening: 850000,  income: 555000, expense: 820000,  closing: 585000  },
-    { name: "Расчётный счёт №2", opening: 310000,  income: 280000, expense: 420000,  closing: 170000  },
-    { name: "Касса",             opening: 85000,   income: 66000,  expense: 76000,   closing: 75000   },
-    { name: "Итого",             opening: 1245000, income: 901000, expense: 1316000, closing: 830000, isTotal: true },
-  ],
-  "month": [
-    { name: "Расчётный счёт №1", opening: 680000,  income: 2150000, expense: 1980000, closing: 850000  },
-    { name: "Расчётный счёт №2", opening: 240000,  income: 870000,  expense: 800000,  closing: 310000  },
-    { name: "Касса",             opening: 55000,   income: 210000,  expense: 180000,  closing: 85000   },
-    { name: "Итого",             opening: 975000,  income: 3230000, expense: 2960000, closing: 1245000, isTotal: true },
-  ],
-  "quarter": [
-    { name: "Расчётный счёт №1", opening: 420000,  income: 6500000, expense: 6070000, closing: 850000  },
-    { name: "Расчётный счёт №2", opening: 180000,  income: 2400000, expense: 2340000, closing: 240000  },
-    { name: "Касса",             opening: 30000,   income: 620000,  expense: 595000,  closing: 55000   },
-    { name: "Итого",             opening: 630000,  income: 9520000, expense: 9005000, closing: 1145000, isTotal: true },
-  ],
-};
-const BALANCE_ROWS = BALANCE_SNAPSHOTS["week"];
-
-/** Returns balance snapshot for a given period key, or interpolates for custom date ranges. */
-function getBalanceRows(period: string, dateFrom: string, dateTo: string): BalanceRow[] {
-  if (period !== "custom") return BALANCE_SNAPSHOTS[period] ?? BALANCE_ROWS;
-  const from = parseRuDate(dateFrom);
-  const to   = parseRuDate(dateTo);
-  if (!from || !to || to < from) return BALANCE_ROWS;
-  const days = Math.max(1, Math.round((to.getTime() - from.getTime()) / 86400000));
-  // Scale week data linearly by number of days for a simple demo interpolation
-  const scale = days / 7;
-  return BALANCE_SNAPSHOTS["week"].map(r => ({
-    ...r,
-    income:  Math.round(r.income  * scale / 1000) * 1000,
-    expense: Math.round(r.expense * scale / 1000) * 1000,
-    closing: r.opening + Math.round((r.income - r.expense) * scale / 1000) * 1000,
-  }));
-}
-
-const PLAN_FACT_ARTICLES = [
-  "Аренда офиса",
-  "Заработная плата",
-  "Расходные материалы",
-  "Услуги подрядчиков",
-  "Налоги и сборы",
-];
-
-// Base budgets per article (in rubles)
-const ARTICLE_BUDGETS: Record<string, number> = {
-  "Аренда офиса":        120000,
-  "Заработная плата":    560000,
-  "Расходные материалы":  30000,
-  "Услуги подрядчиков":  150000,
-  "Налоги и сборы":      310000,
-};
-
-// Real data for specific months — used as-is when available
-const PLAN_FACT_DATA: Record<string, { article: string; budget: number; fact: number }[]> = {
-  "Январь 2026": [
-    { article: "Аренда офиса",        budget: 120000, fact: 120000 },
-    { article: "Заработная плата",    budget: 540000, fact: 536000 },
-    { article: "Расходные материалы", budget: 25000,  fact: 22000  },
-    { article: "Услуги подрядчиков",  budget: 100000, fact: 85000  },
-    { article: "Налоги и сборы",      budget: 290000, fact: 290000 },
-  ],
-  "Февраль 2026": [
-    { article: "Аренда офиса",        budget: 120000, fact: 120000 },
-    { article: "Заработная плата",    budget: 540000, fact: 548000 },
-    { article: "Расходные материалы", budget: 25000,  fact: 31000  },
-    { article: "Услуги подрядчиков",  budget: 100000, fact: 92000  },
-    { article: "Налоги и сборы",      budget: 290000, fact: 290000 },
-  ],
-  "Март 2026": [
-    { article: "Аренда офиса",        budget: 120000, fact: 120000 },
-    { article: "Заработная плата",    budget: 550000, fact: 552000 },
-    { article: "Расходные материалы", budget: 28000,  fact: 35400  },
-    { article: "Услуги подрядчиков",  budget: 110000, fact: 98000  },
-    { article: "Налоги и сборы",      budget: 300000, fact: 300000 },
-  ],
-  "Апрель 2026": [
-    { article: "Аренда офиса",        budget: 120000, fact: 120000 },
-    { article: "Заработная плата",    budget: 560000, fact: 548000 },
-    { article: "Расходные материалы", budget: 30000,  fact: 28400  },
-    { article: "Услуги подрядчиков",  budget: 120000, fact: 95000  },
-    { article: "Налоги и сборы",      budget: 280000, fact: 280000 },
-  ],
-  "Май 2026": [
-    { article: "Аренда офиса",        budget: 120000, fact: 120000 },
-    { article: "Заработная плата",    budget: 560000, fact: 572000 },
-    { article: "Расходные материалы", budget: 30000,  fact: 41500  },
-    { article: "Услуги подрядчиков",  budget: 150000, fact: 130000 },
-    { article: "Налоги и сборы",      budget: 310000, fact: 295000 },
-  ],
-  "Июнь 2026": [
-    { article: "Аренда офиса",        budget: 120000, fact: 120000 },
-    { article: "Заработная плата",    budget: 580000, fact: 560000 },
-    { article: "Расходные материалы", budget: 30000,  fact: 12500  },
-    { article: "Услуги подрядчиков",  budget: 150000, fact: 180000 },
-    { article: "Налоги и сборы",      budget: 350000, fact: 340000 },
-  ],
-};
-
-/**
- * Deterministic pseudo-random generator for plan/fact data.
- * Produces consistent "realistic" numbers for any month not in PLAN_FACT_DATA.
- * Seed = month * 100 + year so each month/year has unique values.
- */
-function genPlanFactData(month: number, year: number): { article: string; budget: number; fact: number }[] {
-  const seed = (year * 12 + month) * 31;
-  let s = seed;
-  const rnd = () => { s = (s * 1664525 + 1013904223) & 0xffffffff; return (s >>> 0) / 0xffffffff; };
-  return PLAN_FACT_ARTICLES.map(article => {
-    const base   = ARTICLE_BUDGETS[article];
-    // Budget varies ±10% from base
-    const budget = Math.round(base * (0.90 + rnd() * 0.20) / 1000) * 1000;
-    // Fact deviates ±25% from budget
-    const fact   = Math.round(budget * (0.75 + rnd() * 0.50) / 100) * 100;
-    return { article, budget, fact };
-  });
 }
 
 const MONTH_NOM_FULL = [
@@ -160,30 +33,13 @@ const MONTH_NOM_FULL = [
   "Июль","Август","Сентябрь","Октябрь","Ноябрь","Декабрь",
 ];
 
-function planFactKey(month: number, year: number): string {
-  return `${MONTH_NOM_FULL[month]} ${year}`;
-}
-
-function getPlanFactRows(month: number, year: number): { article: string; budget: number; fact: number }[] {
-  const key = planFactKey(month, year);
-  return PLAN_FACT_DATA[key] ?? genPlanFactData(month, year);
-}
-
-const EXPORT_FILES = [
-  { name: "Платёжный календарь",       period: "Июнь 2026",  file: "Kalendar_2026-06.xlsx"  },
-  { name: "Реестр платежей",           period: "18.06.2026", file: "Reestr_18.06.2026.xlsx" },
-  { name: "Кассовые разрывы",          period: "Q2 2026",    file: "Cashgaps_Q2_2026.xlsx"  },
-  { name: "Остатки по счетам",         period: "Июнь 2026",  file: "Ostatok_2026-06.xlsx"   },
-  { name: "Движение денежных средств", period: "H1 2026",    file: "DDS_H1_2026.xlsx"       },
+const EXPORT_TYPES = [
+  { id: "balances",  name: "Остатки по счетам",         icon: "📊" },
+  { id: "cashgaps",  name: "Кассовые разрывы",          icon: "⚠️" },
+  { id: "planfact",  name: "План и факт",               icon: "📈" },
 ];
 
 /* ── Helpers ───────────────────────────────────────── */
-const MONTHS_RU = ["января","февраля","марта","апреля","мая","июня","июля","августа","сентября","октября","ноября","декабря"];
-
-function parseGapDate(s: string): Date {
-  const p = s.split(" ");
-  return new Date(+p[2], MONTHS_RU.indexOf(p[1]), +p[0]);
-}
 function parseRuDate(s: string): Date | null {
   const m = s.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
   if (!m) return null;
@@ -201,18 +57,11 @@ function fromISO(s: string): string {
   return `${d}.${mo}.${y}`;
 }
 
-// If account is a single-account string, resolve its currency; multi-account strings default to RUB
-function resolveAccountCurrency(account: string): string {
-  if (!account || account.includes(",")) return "RUB"; // aggregate / multi-account
-  return getAccountCurrency(account);
+function fmtFull(n: number): string {
+  return formatRub(n);
 }
-function fmtFull(n: number, account = ""): string {
-  const cur = resolveAccountCurrency(account);
-  const rub = n / 100;
-  return (rub < 0 ? "−" : "") + formatAmount(Math.abs(rub), cur);
-}
-function fmtShort(n: number, account = ""): string {
-  return formatAmount(n / 100, resolveAccountCurrency(account));
+function fmtShort(n: number): string {
+  return formatRub(n);
 }
 
 /* ── Main component ────────────────────────────────── */
@@ -221,31 +70,7 @@ export function Reports({ onGoToCalendar }: ReportsProps) {
   const { showToast } = useToast();
 
   const handleExport = () => {
-    if (tab === "cashgaps") {
-      exportCsv(
-        "Кассовые_разрывы.csv",
-        ["Дата", "Счёт", "Дефицит", "Крупнейший платёж", "Сумма платежа"],
-        CASH_GAPS.map(g => [g.date, g.account, fmtShort(g.deficit, g.account), g.topPayer, fmtShort(g.topAmount, g.account)]),
-      );
-      showToast("Кассовые_разрывы.csv скачан", "success");
-    } else if (tab === "planfact") {
-      // Export all periods combined
-      const allRows: (string | number)[][] = [];
-      Object.entries(PLAN_FACT_DATA).forEach(([period, items]) => {
-        items.forEach(item => {
-          const diff = item.fact - item.budget;
-          allRows.push([period, item.article, item.budget + " ₽", item.fact + " ₽", (diff >= 0 ? "+" : "") + diff + " ₽"]);
-        });
-      });
-      exportCsv(
-        "План_и_факт.csv",
-        ["Период", "Статья", "Бюджет", "Факт", "Отклонение"],
-        allRows,
-      );
-      showToast("План_и_факт.csv скачан", "success");
-    } else {
-      showToast("Выберите вкладку с данными для выгрузки", "warning");
-    }
+    showToast("Используйте кнопку «Выгрузить в Excel» на каждой вкладке", "info");
   };
 
   return (
@@ -300,22 +125,7 @@ export function Reports({ onGoToCalendar }: ReportsProps) {
         )}
         {tab === "balances" && <BalancesTab />}
         {tab === "planfact" && <PlanFactTab onExport={handleExport} />}
-        {tab === "exports"  && (
-          <ExportsTab
-            onDownload={(name, filename) => {
-              if (name === "Реестр платежей") {
-                exportCsv(filename, ["№", "Контрагент", "Статья", "Дефицит", "Крупнейший платёж"], CASH_GAPS.map(g => [g.date, g.account, "", g.deficit, g.topPayer]));
-              } else if (name === "Кассовые разрывы") {
-                exportCsv(filename, ["Дата", "Счёт", "Дефицит", "Крупнейший платёж", "Сумма"], CASH_GAPS.map(g => [g.date, g.account, g.deficit, g.topPayer, g.topAmount]));
-              } else if (name === "Остатки по счетам") {
-                exportCsv(filename, ["Счёт", "Начало", "Приход", "Расход", "Конец"], BALANCE_ROWS.map(r => [r.name, r.opening, r.income, r.expense, r.closing]));
-              } else {
-                exportCsv(filename, ["Отчёт", "Период"], [[name, "Июнь 2026"]]);
-              }
-              showToast(`${filename} скачан`, "success");
-            }}
-          />
-        )}
+        {tab === "exports"  && <ExportsTab />}
       </div>
     </div>
   );
@@ -358,7 +168,8 @@ function CashGapsTab({
     }
     api.reports.getCashGaps({ date_from: from, date_to: to })
       .then(data => setGaps((data as any[]).map(g => ({
-        date: g.date ?? '', account: g.account ?? '', deficit: g.deficit ?? 0,
+        date: g.date ? new Date(g.date).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' }) : '',
+        account: g.account ?? '', deficit: g.deficit ?? 0,
         topPayer: g.top_payer ?? '', topAmount: g.top_amount ?? 0,
       }))))
       .catch(() => setGaps([]))
@@ -604,7 +415,14 @@ function BalancesTab() {
       const parts2 = dateTo.split('.'); to = `${parts2[2]}-${parts2[1]}-${parts2[0]}`;
     }
     api.reports.getBalances({ date_from: from, date_to: to })
-      .then(data => setRows(data as BalanceRow[]))
+      .then(data => setRows((data as any[]).map(r => ({
+        name: r.account ?? r.name ?? '',
+        opening: r.opening ?? 0,
+        income: r.income ?? 0,
+        expense: r.expense ?? 0,
+        closing: r.closing ?? 0,
+        isTotal: r.is_total ?? false,
+      }))))
       .catch(() => setRows([]))
       .finally(() => setLoading(false));
   }, [period, dateFrom, dateTo]);
@@ -618,11 +436,25 @@ function BalancesTab() {
     showToast("Остатки_по_счетам.csv скачан", "success");
   };
 
-  const PERIOD_LABELS: Record<string, string> = {
-    week:    "23 июня 2026 — 29 июня 2026",
-    month:   "01 июня 2026 — 30 июня 2026",
-    quarter: "01 апреля 2026 — 30 июня 2026",
-    custom:  `${dateFrom} — ${dateTo}`,
+  const formatPeriodLabel = (): string => {
+    const today = new Date();
+    if (period === "week") {
+      const d = new Date(today); d.setDate(d.getDate() - d.getDay() + 1);
+      const e = new Date(d); e.setDate(e.getDate() + 6);
+      return `${d.toLocaleDateString('ru-RU')} — ${e.toLocaleDateString('ru-RU')}`;
+    }
+    if (period === "month") {
+      const start = new Date(today.getFullYear(), today.getMonth(), 1);
+      const end = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+      return `${start.toLocaleDateString('ru-RU')} — ${end.toLocaleDateString('ru-RU')}`;
+    }
+    if (period === "quarter") {
+      const qm = Math.floor(today.getMonth() / 3) * 3;
+      const start = new Date(today.getFullYear(), qm, 1);
+      const end = new Date(today.getFullYear(), qm + 3, 0);
+      return `${start.toLocaleDateString('ru-RU')} — ${end.toLocaleDateString('ru-RU')}`;
+    }
+    return `${dateFrom} — ${dateTo}`;
   };
 
   return (
@@ -674,13 +506,7 @@ function BalancesTab() {
       </div>
 
       <div style={{ marginTop: 10, fontSize: 12, color: C.textLt }}>
-        Период: {PERIOD_LABELS[period]} · Данные актуальны на 26.06.2026
-        {period === "custom" && parseRuDate(dateFrom) && parseRuDate(dateTo) && (
-          <span style={{ color: C.olive, marginLeft: 8 }}>Суммы рассчитаны пропорционально длине периода (прогноз)</span>
-        )}
-        {period === "custom" && !parseRuDate(dateFrom) && (
-          <span style={{ color: C.danger, marginLeft: 8 }}>Введите корректную дату начала (дд.мм.гггг)</span>
-        )}
+        Период: {formatPeriodLabel()}
       </div>
     </div>
   );
@@ -753,6 +579,7 @@ function PlanFactTab({ onExport }: { onExport: () => void }) {
   const goToday   = () => { setSelMonth(5); setSelYear(2026); };
 
   const isToday = selMonth === new Date().getMonth() && selYear === new Date().getFullYear();
+  const isRealData = rows.length > 0;
 
   const totalBudget = rows.reduce((s, r) => s + r.budget, 0);
   const totalFact   = rows.reduce((s, r) => s + r.fact,   0);
@@ -824,7 +651,7 @@ function PlanFactTab({ onExport }: { onExport: () => void }) {
           <tbody>
             {rows.map((row, i) => {
               const diff = row.fact - row.budget;
-              const pct  = Math.round((row.fact / row.budget) * 100);
+              const pct  = row.budget > 0 ? Math.round((row.fact / row.budget) * 100) : 0;
               const over = diff > 0;
               return (
                 <tr key={row.article} style={{ background: i % 2 === 0 ? C.surface : C.ivory50, borderBottom: `1px solid rgba(192,192,160,0.35)` }}>
@@ -857,25 +684,60 @@ function PlanFactTab({ onExport }: { onExport: () => void }) {
 }
 
 /* ── Tab: Выгрузки ─────────────────────────────────── */
-function ExportsTab({ onDownload }: { onDownload: (name: string, filename: string) => void }) {
+function ExportsTab() {
+  const { showToast } = useToast();
+  const today = new Date();
+  const monthStart = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-01`;
+  const monthEnd = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${new Date(today.getFullYear(), today.getMonth()+1, 0).getDate()}`;
+
+  const handleExport = async (type: string) => {
+    try {
+      if (type === "balances") {
+        const data = await api.reports.getBalances({ date_from: monthStart, date_to: monthEnd }) as any[];
+        exportCsv(
+          "Остатки_по_счетам.csv",
+          ["Счёт", "Остаток на начало", "Приход", "Расход", "Остаток на конец"],
+          data.map(r => [r.account, r.opening, r.income, r.expense, r.closing]),
+        );
+      } else if (type === "cashgaps") {
+        const data = await api.reports.getCashGaps({ date_from: monthStart, date_to: monthEnd }) as any[];
+        exportCsv(
+          "Кассовые_разрывы.csv",
+          ["Дата", "Счёт", "Дефицит", "Крупнейший платёж", "Сумма"],
+          data.map(r => [r.date, r.account, r.deficit, r.top_payer, r.top_amount]),
+        );
+      } else if (type === "planfact") {
+        const data = await api.reports.getPlanFact({ date_from: monthStart, date_to: monthEnd }) as any[];
+        exportCsv(
+          "План_и_факт.csv",
+          ["Статья", "Бюджет", "Факт", "Отклонение"],
+          data.map(r => [r.item, r.budget, r.fact, r.fact - r.budget]),
+        );
+      }
+      showToast("Файл скачан", "success");
+    } catch {
+      showToast("Ошибка при выгрузке", "error");
+    }
+  };
+
   return (
     <div style={{ padding: 24, display: "flex", flexDirection: "column", gap: 8 }}>
-      {EXPORT_FILES.map((f, i) => (
+      {EXPORT_TYPES.map((f) => (
         <div
-          key={i}
+          key={f.id}
           style={{ background: C.surface, border: `1px solid ${C.warm}`, borderRadius: 8, padding: "14px 20px", display: "flex", alignItems: "center", gap: 16 }}
         >
-          <div style={{ width: 36, height: 36, borderRadius: 8, background: C.sage10, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-            <BarChart2 size={18} color={C.sage} />
+          <div style={{ width: 36, height: 36, borderRadius: 8, background: C.sage10, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, fontSize: 18 }}>
+            {f.icon}
           </div>
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: 13, fontWeight: 600, color: C.textDk }}>{f.name}</div>
             <div style={{ fontSize: 11, color: C.textLt, marginTop: 2 }}>
-              {f.period} · {f.file.replace(".xlsx", ".csv")}
+              Текущий месяц · CSV
             </div>
           </div>
           <button
-            onClick={() => onDownload(f.name, f.file.replace(".xlsx", ".csv"))}
+            onClick={() => handleExport(f.id)}
             style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 14px", borderRadius: 6, background: "transparent", color: C.olive, border: `1.5px solid ${C.olive}`, fontSize: 12, fontWeight: 500, cursor: "pointer", fontFamily: "Inter, sans-serif", flexShrink: 0 }}
           >
             <Download size={13} />

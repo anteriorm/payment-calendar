@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Database\QueryException;
+use App\Services\AuditService;
 
 
 class UserController extends Controller
@@ -33,6 +34,8 @@ class UserController extends Controller
         ]);
 
         $user = User::create($validated);
+
+        AuditService::log('user_created', $user->name, "Роль: {$user->role}");
 
         return response()->json([
             'id' => $user->id,
@@ -63,6 +66,8 @@ class UserController extends Controller
 
         $user->update($validated);
 
+        AuditService::log('user_updated', $user->name, "Обновлён");
+
         return response()->json([
             'id' => $user->id,
             'name' => $user->name,
@@ -78,7 +83,9 @@ class UserController extends Controller
         }
 
         try {
+            $name = $user->name;
             $user->delete();
+            AuditService::log('user_deleted', $name, "Удалён");
         } catch (QueryException $e) {
             return response()->json(['message' => 'Невозможно удалить пользователя — на него ссылаются заявки или поступления'], 422);
         }
