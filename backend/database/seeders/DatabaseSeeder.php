@@ -15,6 +15,7 @@ class DatabaseSeeder extends Seeder
             ItemSeeder::class,
             PaymentSeeder::class,
             IncomeSeeder::class,
+            AuditSeeder::class,
         ]);
     }
 }

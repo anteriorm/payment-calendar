@@ -1,8 +1,9 @@
 import { useState, useRef, useCallback, useEffect, type MouseEvent, type ReactNode, type Ref } from "react";
-import { ChevronLeft, ChevronRight, AlertTriangle, Calendar as CalIcon, GripVertical } from "lucide-react";
+import { ChevronLeft, ChevronRight, AlertTriangle, Calendar as CalIcon, GripVertical, X } from "lucide-react";
 import { useDrag, useDrop } from "react-dnd";
 import { C } from "../tokens";
-import { ruFmt, fmtAmt, fmtBalance } from "../utils";
+import { ruFmt, fmtAmt, fmtBalance, kopecksToRub } from "../utils";
+import * as api from "../../api";
 
 type Period   = "week" | "month" | "quarter" | "custom";
 type DayState = "positive" | "cashgap" | "zero";
@@ -22,60 +23,23 @@ export interface SelectedCell {
 interface DayEntry { income: number; expense: number; balance: number; }
 
 interface CalendarDay {
-  date:      number;
-  month:     number;
-  dayName:   string;
-  state:     DayState;
-  isToday:   boolean;
-  isWeekend: boolean;
-  acc1:      DayEntry;
-  acc2:      DayEntry;
-  cash:      DayEntry;
-  total:     DayEntry;
+  date:        number;
+  month:       number;
+  year:        number;
+  dayName:     string;
+  state:       DayState;
+  isToday:     boolean;
+  isWeekend:   boolean;
+  acc1:        DayEntry;
+  acc2:        DayEntry;
+  cash:        DayEntry;
+  total:       DayEntry;
+  description: string;
 }
 
-/* ── Static hand-crafted week: June 23–29 2026 ─────── */
-const STATIC_DAYS: CalendarDay[] = [
-  { date: 23, month: 5, dayName: "Пн", state: "positive", isToday: false, isWeekend: false,
-    acc1:  { income: 120000, expense:  85000, balance:   35000 },
-    acc2:  { income:  60000, expense:  40000, balance:   20000 },
-    cash:  { income:  15000, expense:  10000, balance:    5000 },
-    total: { income: 195000, expense: 135000, balance:   60000 } },
-  { date: 24, month: 5, dayName: "Вт", state: "cashgap", isToday: false, isWeekend: false,
-    acc1:  { income:  30000, expense: 220000, balance: -190000 },
-    acc2:  { income:  15000, expense:  80000, balance:  -65000 },
-    cash:  { income:   5000, expense:  20000, balance:  -15000 },
-    total: { income:  50000, expense: 320000, balance: -270000 } },
-  { date: 25, month: 5, dayName: "Ср", state: "positive", isToday: false, isWeekend: false,
-    acc1:  { income:  95000, expense:  60000, balance:   35000 },
-    acc2:  { income:  45000, expense:  30000, balance:   15000 },
-    cash:  { income:  10000, expense:   8000, balance:    2000 },
-    total: { income: 150000, expense:  98000, balance:   52000 } },
-  { date: 26, month: 5, dayName: "Чт", state: "positive", isToday: true,  isWeekend: false,
-    acc1:  { income: 150000, expense:  80000, balance:   70000 },
-    acc2:  { income:  80000, expense:  50000, balance:   30000 },
-    cash:  { income:  20000, expense:  12000, balance:    8000 },
-    total: { income: 250000, expense: 142000, balance:  108000 } },
-  { date: 27, month: 5, dayName: "Пт", state: "cashgap", isToday: false, isWeekend: false,
-    acc1:  { income:  20000, expense: 180000, balance: -160000 },
-    acc2:  { income:  10000, expense:  75000, balance:  -65000 },
-    cash:  { income:   3000, expense:  18000, balance:  -15000 },
-    total: { income:  33000, expense: 273000, balance: -240000 } },
-  { date: 28, month: 5, dayName: "Сб", state: "zero",    isToday: false, isWeekend: true,
-    acc1:  { income: 100000, expense: 100000, balance:       0 },
-    acc2:  { income:  50000, expense:  50000, balance:       0 },
-    cash:  { income:   8000, expense:   8000, balance:       0 },
-    total: { income: 158000, expense: 158000, balance:       0 } },
-  { date: 29, month: 5, dayName: "Вс", state: "cashgap", isToday: false, isWeekend: true,
-    acc1:  { income:  40000, expense:  95000, balance:  -55000 },
-    acc2:  { income:  20000, expense:  45000, balance:  -25000 },
-    cash:  { income:   5000, expense:  10000, balance:   -5000 },
-    total: { income:  65000, expense: 150000, balance:  -85000 } },
-];
-
 /* ── Date helpers ───────────────────────────────────── */
-const BASE       = new Date(2026, 5, 23);   // Monday 23 June 2026
-const TODAY_DATE = new Date(2026, 5, 26);
+const BASE       = new Date(2026, 5, 23);   // Monday 23 June 2026 — epoch for offset calc
+const TODAY_DATE = new Date();               // реальная текущая дата
 
 const DAY_SHORT  = ["Вс","Пн","Вт","Ср","Чт","Пт","Сб"];
 const MONTH_GEN  = ["января","февраля","марта","апреля","мая","июня","июля","августа","сентября","октября","ноября","декабря"];
@@ -102,58 +66,18 @@ function parseDate(s: string): Date | null {
 function daysBetween(a: Date, b: Date): number {
   return Math.max(1, Math.round((b.getTime() - a.getTime()) / 86400000) + 1);
 }
-
-/* ── PRNG / day generator ───────────────────────────── */
-function prng(seed: number): number {
-  let s = ((seed+1)*1664525+1013904223)>>>0;
-  s = (s*1664525+1013904223)>>>0;
-  return s/0xFFFFFFFF;
+function addDays(isoDate: string, days: number): string {
+  const d = new Date(isoDate + "T12:00:00");
+  d.setDate(d.getDate() + days);
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
 }
-function genRound(seed: number, min: number, max: number): number {
-  return Math.floor(min + prng(seed)*(max-min)+0.5)*5000;
+function toISO(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
 }
-function genEntry(seed: number, small=false): DayEntry {
-  const k = small ? 0.12 : 1;
-  const income  = genRound(seed*3+1, 10000*k, 180000*k);
-  const expense = genRound(seed*3+2, 15000*k, 220000*k);
-  return { income, expense, balance: income-expense };
-}
-function genDay(d: Date): CalendarDay {
-  const seed = d.getDate()*100+(d.getMonth()+1)*10+Math.floor(d.getFullYear()/100);
-  const isWeekend = d.getDay()===0||d.getDay()===6;
-  const isToday   = d.toDateString()===TODAY_DATE.toDateString();
-  const acc1  = genEntry(seed+11);
-  const acc2  = genEntry(seed+22);
-  const cash  = genEntry(seed+33,true);
-  const total: DayEntry = { income: acc1.income+acc2.income+cash.income, expense: acc1.expense+acc2.expense+cash.expense, balance: acc1.balance+acc2.balance+cash.balance };
-  const state: DayState = total.balance<0?"cashgap":total.balance===0?"zero":"positive";
-  return { date: d.getDate(), month: d.getMonth(), dayName: DAY_SHORT[d.getDay()], state, isToday, isWeekend, acc1, acc2, cash, total };
-}
-
-/** Returns static data for June 23-29, generated otherwise. */
-function getDayData(d: Date): CalendarDay {
-  if (d.getFullYear()===2026 && d.getMonth()===5) {
-    const s = STATIC_DAYS.find(x => x.date===d.getDate());
-    if (s) return s;
-  }
-  return genDay(d);
-}
-
-function getMatrixDays(startOffset: number, count: number): CalendarDay[] {
-  return Array.from({ length: count }, (_, i) => getDayData(offsetToDate(startOffset+i)));
-}
-
-/** Returns cells for a month grid: null = empty padding cell. */
-function getMonthCells(month: number, year: number): (CalendarDay | null)[] {
-  const first = new Date(year, month, 1);
-  const daysInMonth = new Date(year, month+1, 0).getDate();
-  let pad = first.getDay()-1;
-  if (pad<0) pad=6;  // Sunday → 6
-  const cells: (CalendarDay | null)[] = [];
-  for (let i=0;i<pad;i++) cells.push(null);
-  for (let d=1;d<=daysInMonth;d++) cells.push(getDayData(new Date(year,month,d)));
-  while (cells.length%7!==0) cells.push(null);
-  return cells;
+function parseDateRu(s: string): Date | null { return parseDate(s); }
+function emptyDay(d: Date): CalendarDay {
+  const entry: DayEntry = { income: 0, expense: 0, balance: 0 };
+  return { date: d.getDate(), month: d.getMonth(), year: d.getFullYear(), dayName: DAY_SHORT[d.getDay()], state: "positive", isToday: d.toDateString()===TODAY_DATE.toDateString(), isWeekend: d.getDay()===0||d.getDay()===6, acc1: {...entry}, acc2: {...entry}, cash: {...entry}, total: {...entry}, description: '' };
 }
 
 /* ── Constants ──────────────────────────────────────── */
@@ -162,7 +86,6 @@ const ACCOUNTS: { key: AccKey; name: string }[] = [
   { key: "acc2", name: "Расчётный счёт №2" },
   { key: "cash", name: "Касса"             },
 ];
-const PAYER_NAMES = ["ООО Поставщик Альфа","ИП Смирнов А.В.","АО ТехСервис","ООО РентаГрупп","ПАО Энергоресурс"];
 const PERIOD_LABELS: Record<Period, string> = { week: "Неделя", month: "Месяц", quarter: "Квартал", custom: "Период" };
 
 const HDR_H=70, ACCT_W=180, DAY_MIN=142, SCROLL_PAD=24;
@@ -176,17 +99,26 @@ function getColBorder(_day: CalendarDay) { return `1px solid ${C.warm}`; }
 
 function getTooltipItems(day: CalendarDay, accKey: AccKey) {
   const entry = day[accKey];
-  const seed  = day.date*3+(accKey==="acc1"?0:accKey==="acc2"?1:2);
   const items: { name: string; amount: number; type: "in"|"out" }[] = [];
-  if (entry.income>0)  items.push({ name: PAYER_NAMES[seed%5], amount: entry.income, type: "in" });
-  if (entry.expense>0) {
-    if (entry.expense>80000) {
-      items.push({ name: PAYER_NAMES[(seed+1)%5], amount: Math.round(entry.expense*0.62), type: "out" });
-      items.push({ name: PAYER_NAMES[(seed+3)%5], amount: Math.round(entry.expense*0.38), type: "out" });
-    } else {
-      items.push({ name: PAYER_NAMES[(seed+2)%5], amount: entry.expense, type: "out" });
+
+  // Парсим description из API — формат: "↓ Контрагент: Назначение; ↑ Контрагент: Назначение"
+  if (day.description) {
+    const parts = day.description.split(';').map(s => s.trim()).filter(Boolean);
+    for (const part of parts) {
+      const isIncome = part.startsWith('↑');
+      const isExpense = part.startsWith('↓');
+      if (!isIncome && !isExpense) continue;
+      const text = part.slice(1).trim(); // убираем стрелку
+      items.push({ name: text, amount: 0, type: isIncome ? "in" : "out" });
     }
   }
+
+  // Если description пуст — показываем общие суммы
+  if (items.length === 0) {
+    if (entry.income > 0)  items.push({ name: "Поступления", amount: entry.income, type: "in" });
+    if (entry.expense > 0) items.push({ name: "Списания",     amount: entry.expense, type: "out" });
+  }
+
   return items;
 }
 
@@ -208,18 +140,24 @@ interface PaymentCalendarProps {
 ═══════════════════════════════════════════════════════ */
 export function PaymentCalendar({ onCreateRequest, onSelectRequest, onGoToRegistry, onRescheduleReady, paidConfirmations, canReschedule = false }: PaymentCalendarProps) {
   /* ── Mutable copy of static days (enables reschedule) ── */
-  const [mutableDays, setMutableDays] = useState<CalendarDay[]>(() =>
-    STATIC_DAYS.map(d => ({ ...d, acc1: {...d.acc1}, acc2: {...d.acc2}, cash: {...d.cash}, total: {...d.total} }))
-  );
+  const [mutableDays, setMutableDays] = useState<CalendarDay[]>([]);
+  const [accounts, setAccounts] = useState<{key: AccKey; name: string}[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [apiDays, setApiDays] = useState<Map<string, CalendarDay>>(new Map());
+  const today = `${TODAY_DATE.getFullYear()}-${String(TODAY_DATE.getMonth()+1).padStart(2,"0")}-${String(TODAY_DATE.getDate()).padStart(2,"0")}`;
 
-  /* ── Local day lookup — поиск по date+month без ограничений по году/месяцу ── */
+  /* ── Local day lookup — поиск по date+month ── */
   const getDayDataLocal = useCallback((d: Date): CalendarDay => {
-    // FIX #1: убран хардкод "только июнь 2026"; поиск по date И month
+    // Сначала ищем в данных API
+    const iso = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+    const fromApi = apiDays.get(iso);
+    if (fromApi) return fromApi;
+    // Затем в mutableDays
     const found = mutableDays.find(
       x => x.date === d.getDate() && x.month === d.getMonth()
     );
-    return found ?? genDay(d);
-  }, [mutableDays]);
+    return found ?? emptyDay(d);  // пустой день вместо случайных данных
+  }, [mutableDays, apiDays]);
 
   // Загружаем счета из API при монтировании
   useEffect(() => {
@@ -255,12 +193,14 @@ export function PaymentCalendar({ onCreateRequest, onSelectRequest, onGoToRegist
             existing.isToday = row.date === today;
             existing.total = { income: kopecksToRub(row.income_total), expense: kopecksToRub(row.expense_total), balance: kopecksToRub(row.closing_balance) };
             existing.state = row.has_cash_gap ? "cashgap" : row.closing_balance === 0 ? "zero" : "positive";
+            if (row.description) existing.description = row.description;
             map.set(row.date, existing);
           } else {
             const existing = map.get(row.date) || emptyDay(new Date(row.date + "T12:00:00"));
             const entry: DayEntry = { income: kopecksToRub(row.income_total), expense: kopecksToRub(row.expense_total), balance: kopecksToRub(row.closing_balance) };
             const key = accKeyMap.get(row.account_id) || "cash";
             existing[key] = entry;
+            if (row.description && !existing.description) existing.description = row.description;
             map.set(row.date, existing);
           }
         });
@@ -269,17 +209,6 @@ export function PaymentCalendar({ onCreateRequest, onSelectRequest, onGoToRegist
       .catch((err) => { console.error("[Calendar] API error:", err); })
       .finally(() => setLoading(false));
   };
-
-  useEffect(() => {
-    const customFromDate = parseDateRu(customFrom);
-    const customToDate = parseDateRu(customTo);
-    let start: string, end: string;
-    if (period === "week") { start = anchorDate; end = addDays(anchorDate, 6); }
-    else if (period === "month") { const d = new Date(anchorDate + "T12:00:00"); start = toISO(new Date(d.getFullYear(), d.getMonth(), 1)); end = toISO(new Date(d.getFullYear(), d.getMonth() + 1, 0)); }
-    else if (period === "quarter") { const d = new Date(anchorDate + "T12:00:00"); const qm = Math.floor(d.getMonth() / 3) * 3; start = toISO(new Date(d.getFullYear(), qm, 1)); end = toISO(new Date(d.getFullYear(), qm + 3, 0)); }
-    else { start = customFromDate ? toISO(customFromDate) : anchorDate; end = customToDate ? toISO(customToDate) : addDays(anchorDate, 6); }
-    fetchData(start, end);
-  }, [period, dayOffset, customFrom, customTo]);
 
   const getDay = useCallback((iso: string): CalendarDay => { return apiDays.get(iso) || emptyDay(new Date(iso + "T12:00:00")); }, [apiDays]);
 
@@ -296,15 +225,13 @@ export function PaymentCalendar({ onCreateRequest, onSelectRequest, onGoToRegist
         total: { ...d.total },
       }));
 
-      // FIX #2: getMutable — ищет день по date+month; если нет — генерирует и добавляет.
-      // Это позволяет переносить платежи на/с ЛЮБОЙ даты, не только из STATIC_DAYS.
       const getMutable = (date: Date): CalendarDay => {
         const existing = next.find(
           x => x.date === date.getDate() && x.month === date.getMonth()
         );
         if (existing) return existing;
-        // Генерируем и добавляем в mutableDays — следующий рендер увидит изменения
-        const g = genDay(date);
+        // Генерируем пустой день и добавляем в mutableDays
+        const g = emptyDay(date);
         const cloned: CalendarDay = {
           ...g,
           acc1: { ...g.acc1 }, acc2: { ...g.acc2 },
@@ -378,13 +305,27 @@ export function PaymentCalendar({ onCreateRequest, onSelectRequest, onGoToRegist
   const [pageIndex,    setPageIndex]    = useState(0);
   const [dense,        setDense]        = useState(false);
   const [tooltip,      setTooltip]      = useState<TooltipState | null>(null);
-  const [customFrom,   setCustomFrom]   = useState("23.06.2026");
-  const [customTo,     setCustomTo]     = useState("29.06.2026");
+  const [selectedDay,  setSelectedDay]  = useState<{ day: CalendarDay; accKey: AccKey | "total" } | null>(null);
+  const [customFrom,   setCustomFrom]   = useState(formatDateRu(new Date()));
+  const [customTo,     setCustomTo]     = useState(formatDateRu(new Date(Date.now() + 6 * 86400000)));
   const [statusFilter,       setStatusFilter]       = useState("");
   const [articleFilter,      setArticleFilter]      = useState("");
   const [counterpartyFilter, setCounterpartyFilter] = useState("");
   /** Фильтр счёта для Month/Quarter grid — "total" = все счета */
   const [gridAccKey,         setGridAccKey]         = useState<AccKey | "total">("total");
+
+  /* ── Fetch calendar data when period changes ── */
+  useEffect(() => {
+    const anchorISO = toISO(offsetToDate(dayOffset));
+    const fromRu = parseDate(customFrom);
+    const toRu = parseDate(customTo);
+    let start: string, end: string;
+    if (period === "week") { start = anchorISO; end = addDays(anchorISO, 6); }
+    else if (period === "month") { const d = new Date(anchorISO + "T12:00:00"); start = toISO(new Date(d.getFullYear(), d.getMonth(), 1)); end = toISO(new Date(d.getFullYear(), d.getMonth() + 1, 0)); }
+    else if (period === "quarter") { const d = new Date(anchorISO + "T12:00:00"); const qm = Math.floor(d.getMonth() / 3) * 3; start = toISO(new Date(d.getFullYear(), qm, 1)); end = toISO(new Date(d.getFullYear(), qm + 3, 0)); }
+    else { start = fromRu ? toISO(fromRu) : anchorISO; end = toRu ? toISO(toRu) : addDays(anchorISO, 6); }
+    fetchData(start, end);
+  }, [period, dayOffset, customFrom, customTo]);
 
   /* ── Derived display state ── */
   const anchor        = offsetToDate(dayOffset);
@@ -479,9 +420,13 @@ export function PaymentCalendar({ onCreateRequest, onSelectRequest, onGoToRegist
     }
   };
   const goToday = () => {
-    setDayOffset(0);
+    const now = new Date();
+    setDayOffset(dateToOffset(now));
     setPageIndex(0);
-    if (period === "custom") { setCustomFrom("23.06.2026"); setCustomTo("29.06.2026"); }
+    if (period === "custom") {
+      setCustomFrom(formatDateRu(now));
+      setCustomTo(formatDateRu(new Date(now.getTime() + 6 * 86400000)));
+    }
   };
 
   const handlePeriodChange = (p: Period) => {
@@ -512,18 +457,8 @@ export function PaymentCalendar({ onCreateRequest, onSelectRequest, onGoToRegist
    * year — год ячейки (dispYear покрывает большинство случаев, для квартала
    *         все месяцы обычно в одном году).
    */
-  const handleCellClick = (day: CalendarDay, accKey: AccKey, year: number = dispYear) => {
-    const dd  = String(day.date).padStart(2, "0");
-    const mm  = String(day.month + 1).padStart(2, "0");
-    const clickedDateStr = `${dd}.${mm}.${year}`;
-    onSelectRequest?.({
-      dayDate:        day.date,
-      accKey,
-      isCashGap:      day.state === "cashgap",
-      deficitAmount:  day.state === "cashgap" ? day.total.balance : undefined,
-      clickedDateStr,
-      cellExpense:    day[accKey].expense,
-    });
+  const handleCellClick = (day: CalendarDay, accKey: AccKey | "total", year: number = dispYear) => {
+    setSelectedDay({ day, accKey });
   };
 
   /* ── Range hint label for custom mode ── */
@@ -823,7 +758,11 @@ export function PaymentCalendar({ onCreateRequest, onSelectRequest, onGoToRegist
       })()}
 
       {/* ── View ── */}
-      {useGrid ? (
+      {loading ? (
+        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: C.textLt, fontSize: 14 }}>
+          Загрузка данных календаря…
+        </div>
+      ) : useGrid ? (
         /* ════ MONTH / QUARTER GRID VIEW ════ */
         <div style={{ flex:1, overflow:"auto", padding:SCROLL_PAD }}>
           {period === "quarter" ? (
@@ -855,7 +794,7 @@ export function PaymentCalendar({ onCreateRequest, onSelectRequest, onGoToRegist
                       const toStr   = `${String(toDate).padStart(2,"0")}.${String(toMonth+1).padStart(2,"0")}.${toYear}`;
                       reschedulePayment(fromStr, toStr, item.amount, item.accKey);
                     } : undefined}
-                          onClick={() => day && handleCellClick(day, gridAccKey === "total" ? "acc1" : gridAccKey, dispYear)} />
+                          onClick={() => day && handleCellClick(day, gridAccKey as AccKey | "total", dispYear)} />
                       ))}
                     </div>
                   </div>
@@ -884,7 +823,7 @@ export function PaymentCalendar({ onCreateRequest, onSelectRequest, onGoToRegist
                       const toStr   = `${String(toDate).padStart(2,"0")}.${String(toMonth+1).padStart(2,"0")}.${toYear}`;
                       reschedulePayment(fromStr, toStr, item.amount, item.accKey);
                     } : undefined}
-                    onClick={() => day && handleCellClick(day, gridAccKey === "total" ? "acc1" : gridAccKey, dispYear)} />
+                    onClick={() => day && handleCellClick(day, gridAccKey as AccKey | "total", dispYear)} />
                 ))}
               </div>
             </div>
@@ -1007,25 +946,92 @@ export function PaymentCalendar({ onCreateRequest, onSelectRequest, onGoToRegist
         if (!day) return null;
         const items = getTooltipItems(day, tooltip.accKey);
         const acc   = ACCOUNTS.find(a => a.key===tooltip.accKey)!;
+        const tipEntry = day[tooltip.accKey];
         const tipW  = 260;
         const left  = tooltip.x+tipW>window.innerWidth ? tooltip.x-tipW-20 : tooltip.x;
         return (
           <div style={{ position:"fixed", left, top:tooltip.y, width:tipW, background:C.surface, border:`1px solid ${C.warm}`, borderRadius:8, padding:"12px 14px", zIndex:999, boxShadow:"0 4px 16px rgba(44,44,30,0.18)", pointerEvents:"none", fontFamily:"Inter, sans-serif" }}>
             <div style={{ marginBottom:8 }}>
-              <span style={{ fontSize:11, color:C.textLt }}>{acc.name} · {day.date} {MONTH_GEN[day.month]} {BASE.getFullYear()}</span>
+              <span style={{ fontSize:11, color:C.textLt }}>{acc.name} · {day.date} {MONTH_GEN[day.month]} {day.year ?? new Date().getFullYear()}</span>
             </div>
             <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
               {items.map((item,i) => (
                 <div key={i} style={{ display:"flex", alignItems:"center", gap:6 }}>
                   <span style={{ fontSize:11, color: item.type==="in"?C.sage:C.danger, fontWeight:700, flexShrink:0 }}>{item.type==="in"?"↑":"↓"}</span>
                   <span style={{ fontSize:12, color:C.textDk, flex:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{item.name}</span>
-                  <span style={{ fontSize:12, fontWeight:600, color: item.type==="in"?C.sage:C.textDk, fontVariantNumeric:"tabular-nums", flexShrink:0 }}>{ruFmt(item.amount)} ₽</span>
                 </div>
               ))}
+              {tipEntry.income > 0 && (
+                <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+                  <span style={{ fontSize:11, color:C.sage, fontWeight:700, flexShrink:0 }}>↑</span>
+                  <span style={{ fontSize:12, color:C.textLt, flex:1 }}>Поступления</span>
+                  <span style={{ fontSize:12, fontWeight:600, color:C.sage, fontVariantNumeric:"tabular-nums", flexShrink:0 }}>{ruFmt(tipEntry.income)} ₽</span>
+                </div>
+              )}
+              {tipEntry.expense > 0 && (
+                <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+                  <span style={{ fontSize:11, color:C.danger, fontWeight:700, flexShrink:0 }}>↓</span>
+                  <span style={{ fontSize:12, color:C.textLt, flex:1 }}>Списания</span>
+                  <span style={{ fontSize:12, fontWeight:600, color:C.textDk, fontVariantNumeric:"tabular-nums", flexShrink:0 }}>{ruFmt(tipEntry.expense)} ₽</span>
+                </div>
+              )}
             </div>
             <div style={{ marginTop:8, paddingTop:8, borderTop:`1px solid ${C.ivory}`, display:"flex", justifyContent:"space-between" }}>
               <span style={{ fontSize:11, color:C.textLt }}>Нажмите для деталей</span>
-              <span style={{ fontSize:11, fontWeight:600, color: day.state==="cashgap"?C.danger:C.textLt }}>= {fmtBalance(day[tooltip.accKey].balance)}</span>
+              <span style={{ fontSize:11, fontWeight:600, color: day.state==="cashgap"?C.danger:C.textLt }}>= {fmtBalance(tipEntry.balance)}</span>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Day detail modal ── */}
+      {selectedDay && (() => {
+        const { day, accKey } = selectedDay;
+        const isTotal = accKey === "total";
+        const entry = isTotal ? day.total : day[accKey];
+        const accName = isTotal ? "Все счета" : (ACCOUNTS.find(a => a.key === accKey)?.name ?? "Счёт");
+        const dateStr = `${day.date} ${MONTH_GEN[day.month]} ${day.year ?? new Date().getFullYear()}`;
+        return (
+          <div onClick={() => setSelectedDay(null)} style={{ position:"fixed", inset:0, background:"rgba(44,44,30,0.45)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:1100, fontFamily:"Inter, sans-serif" }}>
+            <div onClick={e => e.stopPropagation()} style={{ width:420, background:C.surface, border:`1px solid ${C.warm}`, borderRadius:12, boxShadow:"0 4px 24px rgba(44,44,30,0.18)", overflow:"hidden" }}>
+              <div style={{ padding:"18px 22px 14px", borderBottom:`1px solid ${C.warm}`, display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+                <div>
+                  <div style={{ fontSize:16, fontWeight:600, color:C.textDk }}>{dateStr}</div>
+                  <div style={{ fontSize:12, color:C.textLt, marginTop:2 }}>{accName}</div>
+                </div>
+                <button onClick={() => setSelectedDay(null)} style={{ background:"none", border:"none", cursor:"pointer", color:C.textLt, padding:4 }}><X size={18} /></button>
+              </div>
+              <div style={{ padding:"16px 22px", display:"flex", flexDirection:"column", gap:12 }}>
+                {/* Описание из API */}
+                {day.description && (
+                  <div style={{ padding:"10px 12px", background:C.ivory, borderRadius:6, fontSize:12, color:C.textDk, lineHeight:1.5 }}>
+                    {day.description}
+                  </div>
+                )}
+                {!day.description && (
+                  <div style={{ padding:"10px 12px", background:C.ivory, borderRadius:6, fontSize:12, color:C.textLt, textAlign:"center" }}>
+                    Нет данных о движениях за этот день
+                  </div>
+                )}
+                {/* Суммы */}
+                <div style={{ display:"flex", gap:16 }}>
+                  <div style={{ flex:1, padding:"10px 12px", background:C.sage10, borderRadius:6 }}>
+                    <div style={{ fontSize:11, color:C.textLt }}>Поступления</div>
+                    <div style={{ fontSize:16, fontWeight:600, color:C.sage, marginTop:4 }}>↑ {ruFmt(entry.income)} ₽</div>
+                  </div>
+                  <div style={{ flex:1, padding:"10px 12px", background:entry.expense>0?"rgba(192,80,74,0.08)":C.ivory, borderRadius:6 }}>
+                    <div style={{ fontSize:11, color:C.textLt }}>Списания</div>
+                    <div style={{ fontSize:16, fontWeight:600, color:entry.expense>0?C.danger:C.textDk, marginTop:4 }}>↓ {ruFmt(entry.expense)} ₽</div>
+                  </div>
+                </div>
+                <div style={{ padding:"10px 12px", background:day.state==="cashgap"?C.danger12:C.surface, border:`1px solid ${day.state==="cashgap"?C.danger:C.warm}`, borderRadius:6, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                  <span style={{ fontSize:12, color:C.textLt }}>Остаток на конец дня</span>
+                  <span style={{ fontSize:16, fontWeight:700, color:day.state==="cashgap"?C.danger:C.textDk }}>{fmtBalance(entry.balance)}</span>
+                </div>
+              </div>
+              <div style={{ padding:"12px 22px 16px", borderTop:`1px solid ${C.warm}`, display:"flex", justifyContent:"flex-end" }}>
+                <button onClick={() => setSelectedDay(null)} style={{ padding:"8px 16px", borderRadius:6, background:C.sage, color:C.surface, border:"none", fontSize:13, fontWeight:500, cursor:"pointer", fontFamily:"Inter, sans-serif" }}>Закрыть</button>
+              </div>
             </div>
           </div>
         );
@@ -1146,6 +1152,12 @@ function GridDayCell({ day, isWeekend, dense, onClick, year = 2026, canDrag = fa
           <div style={{ fontSize:12, fontWeight:700, color: (displayEntry?.balance ?? 0)<0?C.danger:C.textDk, marginTop:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
             = {fmtBalance(displayEntry?.balance ?? 0)}
           </div>
+        </div>
+      )}
+      {/* Description */}
+      {day.description && !dense && (
+        <div style={{ fontSize:9, color:C.textLt, marginTop:2, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", lineHeight:1.2 }}>
+          {day.description}
         </div>
       )}
     </div>

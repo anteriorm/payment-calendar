@@ -13,6 +13,10 @@ use App\Http\Controllers\ReportController;
 use App\Http\Controllers\AuditController;
 use App\Http\Controllers\UserController;
 use App\Http\Controllers\ImportController;
+use App\Http\Controllers\ApprovalController;
+use App\Http\Controllers\RecurringController;
+use App\Http\Controllers\CurrencyController;
+use App\Http\Controllers\DashboardController;
 
 Route::post('/login', [AuthController::class, 'login']);
 
@@ -58,6 +62,28 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Импорт
     Route::post('/import/payments', [ImportController::class, 'importPayments']);
+    Route::post('/import/incomes', [ImportController::class, 'importIncomes']);
+
+    // Маршруты согласования
+    Route::get('/approval-routes', [ApprovalController::class, 'routes']);
+    Route::get('/approvals', [ApprovalController::class, 'allApprovals']);
+    Route::get('/payments/{payment}/approval', [ApprovalController::class, 'getApproval']);
+    Route::post('/payments/{payment}/approval/start', [ApprovalController::class, 'startRoute']);
+    Route::post('/payments/{payment}/approval/stages/{stageId}/approve', [ApprovalController::class, 'approveStage']);
+    Route::post('/payments/{payment}/approval/stages/{stageId}/reject', [ApprovalController::class, 'rejectStage']);
+
+    // Повторяющиеся платежи
+    Route::apiResource('recurring', RecurringController::class);
+    Route::post('/recurring/{recurring}/pause', [RecurringController::class, 'pause']);
+    Route::post('/recurring/{recurring}/resume', [RecurringController::class, 'resume']);
+    Route::post('/recurring/{recurring}/generate', [RecurringController::class, 'generate']);
+
+    // Валюты
+    Route::get('/currencies', [CurrencyController::class, 'index']);
+    Route::put('/currencies/{code}/rate', [CurrencyController::class, 'updateRate']);
+
+    // Дашборд
+    Route::get('/dashboard', [DashboardController::class, 'index']);
 
     // Пользователи (admin)
     Route::apiResource('users', UserController::class);

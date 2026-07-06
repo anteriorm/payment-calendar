@@ -36,13 +36,13 @@ const PRIORITIES: { value: Priority; label: string; dot: string; accent: string;
   { value: "low",    label: "Низкий",  dot: C.sage,   accent: C.sage,    bg: C.sage10                 },
 ];
 
-const ACCOUNTS = [
+const ACCOUNTS_DEFAULT = [
   { value: "Расчётный №1", label: "Расчётный счёт №1 (RUB)" },
   { value: "Расчётный №2", label: "Расчётный счёт №2 (USD)" },
   { value: "Касса",        label: "Касса (RUB)"              },
 ];
 
-const ARTICLES = [
+const ARTICLES_DEFAULT = [
   { value: "Аренда офиса",        label: "Аренда офиса"          },
   { value: "Заработная плата",     label: "Заработная плата"       },
   { value: "Расходные материалы",  label: "Расходные материалы"    },
@@ -50,7 +50,7 @@ const ARTICLES = [
   { value: "Налоги и сборы",       label: "Налоги и сборы"         },
 ];
 
-const COUNTERPARTIES = [
+const COUNTERPARTIES_DEFAULT = [
   "ООО Поставщик Альфа",
   "ИП Смирнов А.В.",
   "АО ТехСервис",
@@ -77,6 +77,27 @@ export function CreateRequestModal({ onClose, initialData, onSave }: CreateReque
   const [errors,       setErrors]       = useState<Record<string, string>>({});
   const [routes,       setRoutes]       = useState<ApprovalRoute[]>([]);
   const [selectedRoute,setSelectedRoute]= useState<number>(1);
+  const [accounts,     setAccounts]     = useState<{value: string; label: string}[]>(ACCOUNTS_DEFAULT);
+  const [articles,     setArticles]     = useState<{value: string; label: string}[]>(ARTICLES_DEFAULT);
+  const [counterparties, setCounterparties] = useState<string[]>(COUNTERPARTIES_DEFAULT);
+
+  useEffect(() => {
+    api.accounts.getAll()
+      .then(data => setAccounts((data as any[]).map(a => ({ value: a.name, label: `${a.name} (${a.currency})` }))))
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    api.items.getAll()
+      .then(data => setArticles((data as any[]).map(i => ({ value: i.name, label: i.name }))))
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    api.counterparties.getAll()
+      .then(data => setCounterparties((data as any[]).map(c => c.name)))
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     api.approvals.getRoutes().then(r => {
@@ -123,8 +144,8 @@ export function CreateRequestModal({ onClose, initialData, onSave }: CreateReque
   };
 
   const filteredCp = counterparty
-    ? COUNTERPARTIES.filter(c => c.toLowerCase().includes(counterparty.toLowerCase()))
-    : COUNTERPARTIES;
+    ? counterparties.filter(c => c.toLowerCase().includes(counterparty.toLowerCase()))
+    : counterparties;
 
   const title = isEdit ? `Редактировать заявку № ${initialData!.id}` : "Новая заявка на платёж";
   const submitLabel = isEdit ? "Сохранить изменения" : "Отправить на согласование";
@@ -184,7 +205,7 @@ export function CreateRequestModal({ onClose, initialData, onSave }: CreateReque
           {/* Счёт */}
           <div>
             <FieldLabel>Счёт</FieldLabel>
-            <SelectField value={account} onChange={setAccount} placeholder="Выберите счёт" options={ACCOUNTS}
+            <SelectField value={account} onChange={setAccount} placeholder="Выберите счёт" options={accounts}
               focusStyle={focusStyle("account")} baseInput={baseInput}
               onFocus={() => setFocusedField("account")} onBlur={() => setFocusedField(null)} />
             {errors.account && <span style={{ fontSize: 11, color: "var(--tm-danger)", marginTop: 4, display: "block" }}>{errors.account}</span>}
@@ -221,7 +242,7 @@ export function CreateRequestModal({ onClose, initialData, onSave }: CreateReque
           {/* Статья расходов */}
           <div>
             <FieldLabel>Статья расходов</FieldLabel>
-            <SelectField value={article} onChange={setArticle} placeholder="Выберите статью" options={ARTICLES}
+            <SelectField value={article} onChange={setArticle} placeholder="Выберите статью" options={articles}
               focusStyle={focusStyle("article")} baseInput={baseInput}
               onFocus={() => setFocusedField("article")} onBlur={() => setFocusedField(null)} />
           </div>

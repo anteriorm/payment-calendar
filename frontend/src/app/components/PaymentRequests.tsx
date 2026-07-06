@@ -5,7 +5,7 @@ import * as api from "../../api";
 import { C } from "../tokens";
 import { useToast } from "./Toast";
 import { CreateRequestModal, type ModalRequestData } from "./CreateRequestModal";
-import { exportCsv, rubToKopecks, kopecksToRub, formatRubFromRub, getAccountCurrency, formatAmount } from "../utils";
+import { exportCsv, rubToKopecks, kopecksToRub, formatRubFromRub, getAccountCurrency, getCurrencySymbol, formatAmount, registerAccountCurrency } from "../utils";
 import { MiniStepper } from "./ApprovalStepper";
 import type { ApprovalStageInfo, ApprovalRoute } from "../../api";
 
@@ -21,6 +21,7 @@ interface Request {
   amount:               number;
   date:                 string;
   account:              string;
+  currency:             string;
   priority:             Priority;
   status:               Status;
   recurringTemplateId?: number;
@@ -100,6 +101,7 @@ function mapApiToRequest(
     : rawDate.split("-").reverse().join(".");
   const rawStatus = (p.status ?? "draft") as string;
   const id = p.id as number;
+  const accountName = ((p.account_name ?? p.account) ?? "") as string;
   return {
     id,
     counterparty:        (p.counterparty ?? "") as string,
@@ -107,7 +109,8 @@ function mapApiToRequest(
     purpose:             (p.purpose ?? "") as string,
     amount:              kopecksToRub((p.amount ?? 0) as number),
     date,
-    account:             ((p.account_name ?? p.account) ?? "") as string,
+    account:             accountName,
+    currency:            (p.currency as string) || getAccountCurrency(accountName),
     priority:            ((p.priority) ?? "medium") as Priority,
     status:              (rawStatus === "in_registry" ? "inRegistry" : rawStatus) as Status,
     approvalStages:      approvalStages && approvalStages.length > 0 ? approvalStages : undefined,
@@ -138,6 +141,31 @@ export function PaymentRequests({ onCreateRequest, onOpenDetails, refreshKey = 0
   const [editRequest,     setEditRequest]     = useState<Request | null>(null);
   const [deleteRequest,   setDeleteRequest]   = useState<Request | null>(null);
   const [showImport,      setShowImport]      = useState(false);
+
+  // ── Загрузка справочников ──
+  const [accounts, setAccounts]               = useState<any[]>([]);
+  const [counterparties, setCounterparties]    = useState<any[]>([]);
+  const [items, setItems]                      = useState<any[]>([]);
+
+  useEffect(() => {
+    const loadRefs = async () => {
+      try {
+        const [acc, cp, it] = await Promise.all([
+          api.accounts.getAll(),
+          api.counterparties.getAll(),
+          api.items.getAll(),
+        ]);
+        setAccounts(acc);
+        setCounterparties(cp);
+        setItems(it);
+        // Register account currencies for multi-currency display
+        (acc as any[]).forEach(a => registerAccountCurrency(a.name, a.currency));
+      } catch (e) {
+        console.error('Не удалось загрузить справочники', e);
+      }
+    };
+    loadRefs();
+  }, []);
 
   // ── Load payments + live approval stages in parallel ──
   const loadData = () => {
@@ -179,10 +207,12 @@ export function PaymentRequests({ onCreateRequest, onOpenDetails, refreshKey = 0
     else { setSortKey(key); setSortDir("asc"); }
   };
 
+  const normalizeAcc = (s: string) => s.replace(/\s*счёт\s*/i, " ").replace(/\s+/g, " ").trim();
+
   const filtered = rows.filter(r => {
     if (search   && !r.counterparty.toLowerCase().includes(search.toLowerCase())) return false;
     if (statusF  && r.status  !== statusF)  return false;
-    if (accountF && r.account !== accountF) return false;
+    if (accountF && normalizeAcc(r.account) !== normalizeAcc(accountF)) return false;
     return true;
   });
 
@@ -211,8 +241,10 @@ export function PaymentRequests({ onCreateRequest, onOpenDetails, refreshKey = 0
     setSelected(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
 
   const handleSaveRequest = async (data: ModalRequestData, asDraft: boolean) => {
-    const amountInKopecks = rubToKopecks(Number(data.amount) || 0);
-    const account = accounts.find(a => a.name === data.account);
+    const amountInKopecks = rubToKopecks(data.amount ?? "0");
+    // Поиск счёта по имени (учитываем короткую и полную форму)
+    const normalize = (s: string) => s.replace(/\s*счёт\s*/i, " ").replace(/\s+/g, " ").trim();
+    const account = accounts.find(a => a.name === data.account || normalize(a.name) === normalize(data.account ?? ""));
     const counterparty = counterparties.find(c => c.name === data.counterparty);
     const item = items.find(i => i.name === data.article);
 
@@ -245,6 +277,7 @@ export function PaymentRequests({ onCreateRequest, onOpenDetails, refreshKey = 0
       }
       setShowCreateModal(false);
       setEditRequest(null);
+      loadData();
     } catch (e) {
       showToast('Ошибка сохранения заявки', 'error');
     }
@@ -273,11 +306,16 @@ export function PaymentRequests({ onCreateRequest, onOpenDetails, refreshKey = 0
     }
   };
 
-  const handleDeleteConfirm = () => {
+  const handleDeleteConfirm = async () => {
     if (!deleteRequest) return;
-    setRows(prev => prev.filter(r => r.id !== deleteRequest.id));
-    showToast(`Заявка № ${deleteRequest.id} удалена`, "error");
-    setDeleteRequest(null);
+    try {
+      await api.payments.delete(deleteRequest.id);
+      showToast(`Заявка № ${deleteRequest.id} удалена`, "success");
+      setDeleteRequest(null);
+      loadData();
+    } catch {
+      showToast("Ошибка удаления заявки", "error");
+    }
   };
 
   const handleExport = () => {
@@ -443,11 +481,24 @@ export function PaymentRequests({ onCreateRequest, onOpenDetails, refreshKey = 0
                         <GitBranch size={14} />
                       </IconBtn>
                     )}
-                    <IconBtn title="Редактировать" hoverColor={C.sage} onClick={() => setEditRequest(req)}>
-                      <Edit2 size={14} />
-                    </IconBtn>
+                    {(isDraft || req.status === "rejected") && (
+                      <IconBtn title="Редактировать" hoverColor={C.sage} onClick={() => setEditRequest(req)}>
+                        <Edit2 size={14} />
+                      </IconBtn>
+                    )}
                     {isDraft && (
                       <IconBtn title="Отправить на согласование" hoverColor={C.sage} onClick={() => handleSend(req.id)}>
+                        <Send size={14} />
+                      </IconBtn>
+                    )}
+                    {req.status === "rejected" && (
+                      <IconBtn title="Повторно согласовать" hoverColor={C.sage} onClick={async () => {
+                        try {
+                          await api.payments.submit(req.id);
+                          showToast("Заявка повторно отправлена на согласование", "success");
+                          loadData();
+                        } catch { showToast("Ошибка отправки", "error"); }
+                      }}>
                         <Send size={14} />
                       </IconBtn>
                     )}

@@ -115,8 +115,8 @@ export function RequestDrawer({ onClose, isCashGap, deficitAmount, onReschedule,
 
   const [tab,          setTab]          = useState<DrawerTab>("history");
   const [status,       setStatus]       = useState<DrawerStatus>("pending");
-  const [history,      setHistory]      = useState<HistoryEntry[]>(INITIAL_HISTORY);
-  const [log,          setLog]          = useState<LogEntry[]>(INITIAL_LOG);
+  const [history,      setHistory]      = useState<HistoryEntry[]>([]);
+  const [log,          setLog]          = useState<LogEntry[]>([]);
 
   // Sync "История согласований" from real approval stages whenever they change
   useEffect(() => {

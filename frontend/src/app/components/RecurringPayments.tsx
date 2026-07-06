@@ -36,9 +36,6 @@ const PRIORITY_DOT: Record<string, string> = { high: C.danger, medium: C.beige, 
 // #   Название     Статья  Счёт  Сумма  Частота  Следующий  Статус  Действия
 const COLS = "36px minmax(130px,1fr) 98px 78px 92px 98px 112px 80px 158px";
 
-const ACCOUNTS       = ["Расчётный №1", "Расчётный №2", "Касса"];
-const ARTICLES       = ["Аренда офиса", "Заработная плата", "Расходные материалы", "Услуги подрядчиков", "Налоги и сборы", "Аренда"];
-const COUNTERPARTIES = ["ООО РентаГрупп", "ИП Смирнов А.В.", "АО ТехСервис", "ООО Поставщик Альфа", "ПАО Энергоресурс", "ООО ТехСервис", "Выплаты сотрудникам"];
 const FREQ_OPTIONS: { value: RecurringFrequency; label: string }[] = [
   { value: "weekly",    label: "Еженедельно"    },
   { value: "monthly",   label: "Ежемесячно"     },
@@ -117,11 +114,26 @@ export function RecurringPayments({ canCreate = false, canOperate = false }: Rec
   // Delete confirm modal
   const [delTarget,   setDelTarget]   = useState<RecurringTemplate | null>(null);
 
+  // Reference data for form dropdowns
+  const [accounts, setAccounts]         = useState<string[]>([]);
+  const [counterparties, setCounterparties] = useState<string[]>([]);
+  const [articles, setArticles]         = useState<string[]>([]);
+
   useEffect(() => {
     setLoading(true);
     api.recurring.getAll()
       .then(data => { setRows(data as RecurringTemplate[]); setLoading(false); })
       .catch(() => { setError("Не удалось загрузить шаблоны"); setLoading(false); });
+  }, []);
+
+  useEffect(() => {
+    Promise.all([api.accounts.getAll(), api.counterparties.getAll(), api.items.getAll()])
+      .then(([acc, cp, items]) => {
+        setAccounts((acc as any[]).map(a => a.name));
+        setCounterparties((cp as any[]).map(c => c.name));
+        setArticles((items as any[]).map(i => i.name));
+      })
+      .catch(() => {});
   }, []);
 
   function openCreate() {
@@ -422,15 +434,15 @@ export function RecurringPayments({ canCreate = false, canOperate = false }: Rec
               </div>
 
               <FormField label="Контрагент" error={formErr.counterparty}>
-                <SelectW value={form.counterparty} onChange={v => setForm(f => ({ ...f, counterparty: v }))} placeholder="Выберите контрагента" options={COUNTERPARTIES.map(c => ({ value: c, label: c }))} base={selBase} err={!!formErr.counterparty} />
+                <SelectW value={form.counterparty} onChange={v => setForm(f => ({ ...f, counterparty: v }))} placeholder="Выберите контрагента" options={counterparties.map(c => ({ value: c, label: c }))} base={selBase} err={!!formErr.counterparty} />
               </FormField>
 
               <FormField label="Статья расходов" error={formErr.article}>
-                <SelectW value={form.article} onChange={v => setForm(f => ({ ...f, article: v }))} placeholder="Выберите статью" options={ARTICLES.map(a => ({ value: a, label: a }))} base={selBase} err={!!formErr.article} />
+                <SelectW value={form.article} onChange={v => setForm(f => ({ ...f, article: v }))} placeholder="Выберите статью" options={articles.map(a => ({ value: a, label: a }))} base={selBase} err={!!formErr.article} />
               </FormField>
 
               <FormField label="Счёт" error={formErr.account}>
-                <SelectW value={form.account} onChange={v => setForm(f => ({ ...f, account: v }))} placeholder="Выберите счёт" options={ACCOUNTS.map(a => ({ value: a, label: a }))} base={selBase} err={!!formErr.account} />
+                <SelectW value={form.account} onChange={v => setForm(f => ({ ...f, account: v }))} placeholder="Выберите счёт" options={accounts.map(a => ({ value: a, label: a }))} base={selBase} err={!!formErr.account} />
               </FormField>
 
               <FormField label="Сумма (₽)" error={formErr.amount}>

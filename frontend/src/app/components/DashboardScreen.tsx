@@ -1,68 +1,72 @@
 /**
  * DashboardScreen — Главная / Обзорный экран.
- *
- * STUB: данные сейчас статические (mock).
- * При подключении бэкенда замените секцию "// STUB DATA" на:
- *   const { data, loading, error } = useApi('/api/dashboard');
- * и используйте данные из ответа.
+ * Данные загружаются из GET /api/dashboard.
  */
 
 import { useState, useEffect, useRef, type CSSProperties, type ReactNode } from "react";
 import { AlertTriangle, TrendingUp, Clock, ArrowUpCircle, ArrowDownCircle } from "lucide-react";
 import { C } from "../tokens";
 import { useAuth } from "../context/AuthContext";
-import { ruFmt } from "../utils";
+import { kopecksToRub, formatRub } from "../utils";
+import * as api from "../../api";
 
-/* ── STUB DATA — replace with GET /api/dashboard ──────────── */
-const SUMMARY = {
-  totalBalance:     1037500,
-  nearestGapDate:   "24 июня 2026",
-  nearestGapAmount: -270000,
-  pendingCount:     3,
-  todayPayments:    142000,
-  todayIncome:      250000,
-};
+interface DashboardSummary {
+  totalBalance: number;
+  nearestGapDate: string | null;
+  nearestGapAmount: number;
+  pendingCount: number;
+  todayPayments: number;
+  todayIncome: number;
+}
 
-const BALANCE_CHART = [
-  { date: "23 июн", balance: 60000   },
-  { date: "24 июн", balance: -270000 },
-  { date: "25 июн", balance: 52000   },
-  { date: "26 июн", balance: 108000  },
-  { date: "27 июн", balance: -240000 },
-  { date: "28 июн", balance: 0       },
-  { date: "29 июн", balance: -85000  },
-];
+interface ChartPoint {
+  date: string;
+  balance: number;
+}
 
-const RECENT_EVENTS = [
-  { id: 1, time: "11:45", text: "Заявка № 2843 отправлена на согласование",    type: "info"    },
-  { id: 2, time: "12:10", text: "Заявка № 2845 согласована — Козлова Е.В.",     type: "success" },
-  { id: 3, time: "14:30", text: "Реестр 18.06.2026 сформирован (5 заявок)",     type: "info"    },
-  { id: 4, time: "15:00", text: "⚠ Кассовый разрыв 27 июня: −240 000 ₽",       type: "danger"  },
-  { id: 5, time: "15:40", text: "Платёж № 2847 перенесён: 29.06 → 26.06",       type: "success" },
-];
+interface EventItem {
+  id: number;
+  time: string;
+  text: string;
+  type: string;
+}
 
-const EVENT_COLORS = {
+const EVENT_COLORS: Record<string, { bg: string; color: string; dot: string }> = {
   success: { bg: C.sage10,   color: C.sage,   dot: C.sage   },
   info:    { bg: C.olive20,  color: C.olive,  dot: C.olive  },
   danger:  { bg: C.danger12, color: C.danger, dot: C.danger },
 };
-/* ──────────────────────────────────────────────────────────── */
 
 function ruFmt2(n: number): string {
-  return (n < 0 ? "−" : "") + ruFmt(Math.abs(n)) + " ₽";
+  return formatRub(n);
 }
 
 export function DashboardScreen() {
   const { user } = useAuth();
   const [loading, setLoading] = useState(true);
+  const [summary, setSummary] = useState<DashboardSummary | null>(null);
+  const [chart, setChart] = useState<ChartPoint[]>([]);
+  const [events, setEvents] = useState<EventItem[]>([]);
 
-  // STUB: simulate API loading (remove in production)
   useEffect(() => {
-    const t = setTimeout(() => setLoading(false), 800);
-    return () => clearTimeout(t);
+    api.dashboard.get()
+      .then((data: any) => {
+        setSummary(data.summary);
+        setChart(data.chart);
+        setEvents(data.events);
+      })
+      .catch(() => {
+        // fallback на пустые данные
+        setSummary({ totalBalance: 0, nearestGapDate: null, nearestGapAmount: 0, pendingCount: 0, todayPayments: 0, todayIncome: 0 });
+        setChart([]);
+        setEvents([]);
+      })
+      .finally(() => setLoading(false));
   }, []);
 
-  const today = "26 июня 2026, суббота";
+  const today = new Date().toLocaleDateString("ru-RU", { day: "numeric", month: "long", year: "numeric", weekday: "long" });
+
+  const s = summary ?? { totalBalance: 0, nearestGapDate: null, nearestGapAmount: 0, pendingCount: 0, todayPayments: 0, todayIncome: 0 };
 
   return (
     <div
@@ -88,22 +92,22 @@ export function DashboardScreen() {
           <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 14, marginBottom: 24 }}>
             <StatCard
               label="Общий остаток"
-              value={ruFmt2(SUMMARY.totalBalance)}
+              value={ruFmt2(s.totalBalance)}
               valueColor={C.sage}
               icon={<TrendingUp size={18} color={C.sage} />}
               bg={C.sage10}
             />
             <StatCard
               label="Ближайший разрыв"
-              value={ruFmt2(SUMMARY.nearestGapAmount)}
+              value={s.nearestGapDate ? ruFmt2(s.nearestGapAmount) : "Нет"}
               valueColor={C.danger}
-              sub={SUMMARY.nearestGapDate}
+              sub={s.nearestGapDate ?? "Разрывов нет"}
               icon={<AlertTriangle size={18} color={C.danger} />}
               bg={C.danger12}
             />
             <StatCard
               label="Ожидают согласования"
-              value={String(SUMMARY.pendingCount)}
+              value={String(s.pendingCount)}
               valueSuffix=" заявок"
               valueColor={C.olive}
               icon={<Clock size={18} color={C.olive} />}
@@ -112,14 +116,14 @@ export function DashboardScreen() {
             />
             <StatCard
               label="Платежей сегодня"
-              value={ruFmt2(SUMMARY.todayPayments)}
+              value={ruFmt2(s.todayPayments)}
               valueColor={C.danger}
               icon={<ArrowDownCircle size={18} color={C.danger} />}
               bg={C.danger08}
             />
             <StatCard
               label="Поступлений сегодня"
-              value={ruFmt2(SUMMARY.todayIncome)}
+              value={ruFmt2(s.todayIncome)}
               valueColor={C.sage}
               icon={<ArrowUpCircle size={18} color={C.sage} />}
               bg={C.sage10}
@@ -141,11 +145,11 @@ export function DashboardScreen() {
             >
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
                 <h3 style={{ fontSize: 14, fontWeight: 600, color: C.textDk, margin: 0 }}>
-                  Остаток по дням — Июнь 2026
+                  Остаток по дням
                 </h3>
                 <span style={{ fontSize: 11, color: C.textLt }}>Итого по всем счетам</span>
               </div>
-              <SvgBarChart data={BALANCE_CHART} height={220} />
+              <SvgBarChart data={chart.map(c => ({ ...c, balance: kopecksToRub(c.balance) }))} height={220} />
               <div style={{ display: "flex", gap: 16, marginTop: 8, paddingLeft: 4 }}>
                 <LegendDot color={C.sage}   label="Положительный" />
                 <LegendDot color={C.danger} label="Кассовый разрыв" />
@@ -169,11 +173,13 @@ export function DashboardScreen() {
                 <h3 style={{ fontSize: 14, fontWeight: 600, color: C.textDk, margin: 0 }}>
                   Последние события
                 </h3>
-                <span style={{ fontSize: 11, color: C.textLt }}>26 июня 2026</span>
               </div>
               <div style={{ flex: 1, overflowY: "auto" }}>
-                {RECENT_EVENTS.map(ev => {
-                  const ec = EVENT_COLORS[ev.type as keyof typeof EVENT_COLORS] ?? EVENT_COLORS.info;
+                {events.length === 0 && (
+                  <div style={{ padding: 20, textAlign: "center", color: C.textLt, fontSize: 13 }}>Нет событий</div>
+                )}
+                {events.map(ev => {
+                  const ec = EVENT_COLORS[ev.type] ?? EVENT_COLORS.info;
                   return (
                     <div
                       key={ev.id}
@@ -207,10 +213,7 @@ export function DashboardScreen() {
   );
 }
 
-/* ── Чистый SVG-график без recharts ─────────────────────────
- * Заменяет recharts BarChart, который генерировал duplicate-key warnings.
- * Показывает остатки по дням: зелёный = положительный, красный = разрыв.
- * ─────────────────────────────────────────────────────────── */
+/* ── SVG Bar Chart ─────────────────────────────────────── */
 interface SvgBarChartProps {
   data:   { date: string; balance: number }[];
   height: number;
@@ -219,6 +222,8 @@ interface SvgBarChartProps {
 function SvgBarChart({ data, height }: SvgBarChartProps) {
   const ref = useRef<SVGSVGElement>(null);
   const [tooltip, setTooltip] = useState<{ x: number; y: number; value: number; date: string } | null>(null);
+
+  if (data.length === 0) return <div style={{ height, display: "flex", alignItems: "center", justifyContent: "center", color: C.textLt, fontSize: 13 }}>Нет данных</div>;
 
   const W       = 520;
   const PAD_L   = 40;
@@ -247,7 +252,6 @@ function SvgBarChart({ data, height }: SvgBarChartProps) {
         style={{ display: "block", fontFamily: "Inter, sans-serif" }}
         onMouseLeave={() => setTooltip(null)}
       >
-        {/* Horizontal grid lines */}
         {yTicks.map((v, i) => {
           const y = zeroY - v * scale;
           return (
@@ -257,13 +261,12 @@ function SvgBarChart({ data, height }: SvgBarChartProps) {
                 strokeWidth={v === 0 ? 1.5 : 1}
                 strokeDasharray={v === 0 ? undefined : "3 3"} />
               <text x={PAD_L - 4} y={y + 4} textAnchor="end" fontSize={9} fill={C.textLt}>
-                {`${(v / 1000).toFixed(0)}k`}
+                {v === 0 ? "0" : `${(v / 1000).toFixed(0)} тыс.`}
               </text>
             </g>
           );
         })}
 
-        {/* Bars */}
         {data.map((d, i) => {
           const cx  = PAD_L + i * slot + slot / 2;
           const bx  = cx - barW / 2;
@@ -289,7 +292,6 @@ function SvgBarChart({ data, height }: SvgBarChartProps) {
         })}
       </svg>
 
-      {/* Tooltip */}
       {tooltip && (
         <div style={{
           position: "absolute",
@@ -307,7 +309,7 @@ function SvgBarChart({ data, height }: SvgBarChartProps) {
           boxShadow: "0 2px 8px rgba(44,44,30,0.12)",
           zIndex: 10,
         }}>
-          <strong>{tooltip.date}</strong>: {ruFmt2(tooltip.value)}
+          <strong>{tooltip.date}</strong>: {formatRub(Math.round(tooltip.value * 100))}
         </div>
       )}
     </div>
@@ -315,7 +317,6 @@ function SvgBarChart({ data, height }: SvgBarChartProps) {
 }
 
 /* ── Sub-components ───────────────────────────────────────── */
-
 function StatCard({
   label, value, valueSuffix, sub, valueColor, icon, bg, showRubNote = true,
 }: {

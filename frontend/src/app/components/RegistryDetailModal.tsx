@@ -10,6 +10,7 @@ import { X, Download, CheckCircle, XCircle } from "lucide-react";
 import { C } from "../tokens";
 import { useToast } from "./Toast";
 import { exportCsv, formatAmount, getAccountCurrency } from "../utils";
+import * as api from "../../api";
 
 interface RegistryRow {
   id:           number;
@@ -70,7 +71,7 @@ const PRIORITY_DOT: Record<RegistryRow["priority"], { dot: string; border?: bool
 };
 
 function ruFmt(n: number, account = ""): string {
-  return formatAmount(n, getAccountCurrency(account));
+  return formatAmount(n / 100, getAccountCurrency(account));
 }
 
 interface RegistryDetailModalProps {
@@ -86,11 +87,29 @@ export function RegistryDetailModal({ registryId, onClose }: RegistryDetailModal
 
   useEffect(() => {
     setLoading(true);
-    // STUB: api.registries.getOne(registryId).then(...)
-    setTimeout(() => {
-      setDetail({ ...MOCK_DETAIL, id: registryId });
-      setLoading(false);
-    }, 300);
+    api.registries.getOne(registryId)
+      .then((data: any) => {
+        setDetail({
+          id: data.id,
+          registry_date: data.registry_date ?? '',
+          status: data.status ?? 'created',
+          created_by: data.created_by ?? '',
+          approved_by: data.approved_by ?? undefined,
+          total_amount: data.total_amount ?? 0,
+          rows: (data.payments ?? []).map((p: any) => ({
+            id: p.id,
+            counterparty: p.counterparty ?? '',
+            article: p.article ?? '',
+            amount: p.amount ?? 0,
+            account: p.account ?? '',
+            date: p.date ?? '',
+            priority: p.priority ?? 'medium',
+            status: p.status === 'paid' ? 'paid' : p.status === 'in_registry' ? 'registry' : 'registry',
+          })),
+        });
+      })
+      .catch(() => setDetail(null))
+      .finally(() => setLoading(false));
   }, [registryId]);
 
   const handleExport = () => {

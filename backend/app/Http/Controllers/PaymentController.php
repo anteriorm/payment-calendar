@@ -12,6 +12,26 @@ use Carbon\Carbon;
 
 class PaymentController extends Controller
 {
+    private function formatPayment(Payment $payment): array
+    {
+        return [
+            'id' => $payment->id,
+            'amount' => $payment->amount,
+            'planned_date' => $payment->planned_date->toDateString(),
+            'account_id' => $payment->account_id,
+            'account_name' => $payment->account?->name ?? '',
+            'counterparty_id' => $payment->counterparty_id,
+            'counterparty' => $payment->counterparty?->name ?? '',
+            'item_id' => $payment->item_id,
+            'item' => $payment->item?->name ?? '',
+            'purpose' => $payment->purpose ?? '',
+            'priority' => $payment->priority,
+            'status' => $payment->status,
+            'created_by' => $payment->creator?->name ?? '',
+            'registry_id' => $payment->registry_id,
+        ];
+    }
+
     public function index(Request $request)
     {
         $query = Payment::with(['account', 'counterparty', 'item', 'creator'])
@@ -37,7 +57,7 @@ class PaymentController extends Controller
             $query->where('planned_date', '<=', $request->date_to);
         }
 
-        return response()->json($query->get());
+        return response()->json($query->get()->map(fn($p) => $this->formatPayment($p)));
     }
 
     public function store(Request $request)
@@ -92,13 +112,21 @@ class PaymentController extends Controller
 
         AuditService::log('payment_created', "Заявка №{$payment->id}", $payment->purpose);
 
-        return response()->json($payment, 201);
+        return response()->json($this->formatPayment($payment), 201);
     }
 
     public function show(Payment $payment)
     {
         $payment->load(['account', 'counterparty', 'item', 'creator', 'approvals.user']);
-        return response()->json($payment);
+        $result = $this->formatPayment($payment);
+        $result['approvals'] = $payment->approvals->map(fn($a) => [
+            'id' => $a->id,
+            'user' => $a->user?->name ?? '',
+            'decision' => $a->decision,
+            'comment' => $a->comment ?? '',
+            'date' => $a->created_at?->toIso8601String() ?? '',
+        ]);
+        return response()->json($result);
     }
 
     public function update(Request $request, Payment $payment)
@@ -120,7 +148,7 @@ class PaymentController extends Controller
         $payment->update($validated);
         $payment->load(['account', 'counterparty', 'item', 'creator']);
 
-        return response()->json($payment);
+        return response()->json($this->formatPayment($payment));
     }
 
     public function destroy(Payment $payment)
@@ -147,7 +175,7 @@ class PaymentController extends Controller
 
         AuditService::log('payment_submitted', "Заявка №{$payment->id}", 'Отправлена на согласование');
 
-        return response()->json(['message' => 'Заявка отправлена на согласование', 'payment' => $payment]);
+        return response()->json(['message' => 'Заявка отправлена на согласование', 'payment' => $this->formatPayment($payment)]);
     }
 
     public function approve(Request $request, Payment $payment)
@@ -174,7 +202,7 @@ class PaymentController extends Controller
 
         AuditService::log('payment_approved', "Заявка №{$payment->id}", $request->comment);
 
-        return response()->json(['message' => 'Заявка утверждена', 'payment' => $payment]);
+        return response()->json(['message' => 'Заявка утверждена', 'payment' => $this->formatPayment($payment)]);
     }
 
     public function reject(Request $request, Payment $payment)
@@ -201,7 +229,7 @@ class PaymentController extends Controller
 
         AuditService::log('payment_rejected', "Заявка №{$payment->id}", $request->comment);
 
-        return response()->json(['message' => 'Заявка отклонена', 'payment' => $payment]);
+        return response()->json(['message' => 'Заявка отклонена', 'payment' => $this->formatPayment($payment)]);
     }
 
     // -------- Перенос --------
@@ -223,6 +251,6 @@ class PaymentController extends Controller
 
         AuditService::log('payment_moved', "Заявка №{$payment->id}", "{$oldDate} → {$request->planned_date}");
 
-        return response()->json(['message' => 'Дата платежа изменена', 'payment' => $payment]);
+        return response()->json(['message' => 'Дата платежа изменена', 'payment' => $this->formatPayment($payment)]);
     }
 }

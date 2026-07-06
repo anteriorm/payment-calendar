@@ -28,6 +28,7 @@ export { recurringService as recurring }    from "./endpoints/recurring";
 export { currenciesService as currencies }  from "./endpoints/currencies";
 export { approvalsService as approvals }   from "./endpoints/approvals";
 export { importService as importSvc }      from "./endpoints/import";
+export { dashboardService as dashboard }    from "./endpoints/dashboard";
 
 // Re-export types for convenience
 export type { Account }         from "./mocks/data/accounts";

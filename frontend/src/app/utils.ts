@@ -56,12 +56,12 @@ export function getAccountCurrency(accountName: string): string {
  *   85000 + "EUR" → "85 000 €"
  */
 export function formatAmount(amount: number, currency: string): string {
-  const s = Math.floor(Math.abs(amount)).toString();
-  const parts: string[] = [];
-  for (let i = s.length; i > 0; i -= 3) parts.unshift(s.slice(Math.max(0, i - 3), i));
-  const fmt = parts.join(" "); // non-breaking space
+  const abs  = Math.abs(amount);
+  const [int, dec] = abs.toFixed(2).split(".");
+  const intFmt = int.replace(/\B(?=(\d{3})+(?!\d))/g, " ");
   const sym = CURRENCY_SYMBOLS[currency] ?? "₽";
-  return `${fmt} ${sym}`;
+  const result = `${intFmt},${dec} ${sym}`;
+  return amount < 0 ? `−${result}` : result;
 }
 
 /** Converts amount to RUB using provided exchange rates */

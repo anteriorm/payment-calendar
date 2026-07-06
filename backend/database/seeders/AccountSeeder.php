@@ -19,7 +19,7 @@ class AccountSeeder extends Seeder
         Account::create([
             'name' => 'Расчётный счёт №2',
             'type' => 'bank',
-            'currency' => 'RUB',
+            'currency' => 'USD',
             'initial_balance' => 20000000,
         ]);
 

@@ -1,8 +1,9 @@
-import { useState, useRef, type ReactElement } from "react";
+import { useState, useEffect, useRef, type ReactElement } from "react";
 import { BarChart2, AlertTriangle, ArrowUpRight, Calendar, ChevronDown, Download } from "lucide-react";
 import { useToast } from "./Toast";
 import { C } from "../tokens";
 import { exportCsv, formatAmount, getAccountCurrency } from "../utils";
+import * as api from "../../api";
 
 type TabId = "cashgaps" | "balances" | "planfact" | "exports";
 
@@ -207,10 +208,11 @@ function resolveAccountCurrency(account: string): string {
 }
 function fmtFull(n: number, account = ""): string {
   const cur = resolveAccountCurrency(account);
-  return (n < 0 ? "−" : "") + formatAmount(Math.abs(n), cur);
+  const rub = n / 100;
+  return (rub < 0 ? "−" : "") + formatAmount(Math.abs(rub), cur);
 }
 function fmtShort(n: number, account = ""): string {
-  return formatAmount(n, resolveAccountCurrency(account));
+  return formatAmount(n / 100, resolveAccountCurrency(account));
 }
 
 /* ── Main component ────────────────────────────────── */
@@ -324,25 +326,46 @@ function CashGapsTab({
   onGoToCalendar,
   onExport,
 }: { onGoToCalendar?: () => void; onExport: () => void }) {
+  const today = new Date();
+  const todayStr = `${String(today.getDate()).padStart(2,'0')}.${String(today.getMonth()+1).padStart(2,'0')}.${today.getFullYear()}`;
+  const weekEnd = new Date(today); weekEnd.setDate(weekEnd.getDate() + 6);
+  const weekEndStr = `${String(weekEnd.getDate()).padStart(2,'0')}.${String(weekEnd.getMonth()+1).padStart(2,'0')}.${weekEnd.getFullYear()}`;
   const [period,   setPeriod]   = useState("week");
-  const [dateFrom, setDateFrom] = useState("23.06.2026");
-  const [dateTo,   setDateTo]   = useState("29.06.2026");
+  const [dateFrom, setDateFrom] = useState(todayStr);
+  const [dateTo,   setDateTo]   = useState(weekEndStr);
+  const [gaps,     setGaps]     = useState<CashGap[]>([]);
+  const [loading,  setLoading]  = useState(true);
 
-  /* ── Filter logic ── */
-  const filteredGaps = CASH_GAPS.filter(gap => {
-    const d = parseGapDate(gap.date);
-    if (period === "week")    return d >= new Date(2026,5,23) && d <= new Date(2026,5,29);
-    if (period === "month")   return d.getMonth()===5 && d.getFullYear()===2026;
-    if (period === "quarter") return d >= new Date(2026,3,1) && d <= new Date(2026,5,30);
-    if (period === "custom") {
-      const from = parseRuDate(dateFrom);
-      const to   = parseRuDate(dateTo);
-      if (!from || !to) return true;
-      return d >= from && d <= to;
+  useEffect(() => {
+    setLoading(true);
+    const today = new Date();
+    let from: string, to: string;
+    if (period === "week") {
+      const d = new Date(today); d.setDate(d.getDate() - d.getDay() + 1);
+      from = d.toISOString().split('T')[0];
+      const e = new Date(d); e.setDate(e.getDate() + 6);
+      to = e.toISOString().split('T')[0];
+    } else if (period === "month") {
+      from = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-01`;
+      to = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${new Date(today.getFullYear(), today.getMonth()+1, 0).getDate()}`;
+    } else if (period === "quarter") {
+      const qm = Math.floor(today.getMonth() / 3) * 3;
+      from = `${today.getFullYear()}-${String(qm+1).padStart(2,'0')}-01`;
+      to = `${today.getFullYear()}-${String(qm+3).padStart(2,'0')}-${new Date(today.getFullYear(), qm+3, 0).getDate()}`;
+    } else {
+      const parts = dateFrom.split('.'); from = `${parts[2]}-${parts[1]}-${parts[0]}`;
+      const parts2 = dateTo.split('.'); to = `${parts2[2]}-${parts2[1]}-${parts2[0]}`;
     }
-    return true;
-  });
+    api.reports.getCashGaps({ date_from: from, date_to: to })
+      .then(data => setGaps((data as any[]).map(g => ({
+        date: g.date ?? '', account: g.account ?? '', deficit: g.deficit ?? 0,
+        topPayer: g.top_payer ?? '', topAmount: g.top_amount ?? 0,
+      }))))
+      .catch(() => setGaps([]))
+      .finally(() => setLoading(false));
+  }, [period, dateFrom, dateTo]);
 
+  const filteredGaps = gaps;
   const totalDeficit = filteredGaps.reduce((s, g) => s + g.deficit, 0);
   const gapWord = filteredGaps.length === 1 ? "разрыв" : filteredGaps.length < 5 ? "разрыва" : "разрывов";
 
@@ -550,11 +573,41 @@ function CashGapCard({
 /* ── Tab: Остатки по счетам ────────────────────────── */
 function BalancesTab() {
   const { showToast } = useToast();
+  const today = new Date();
+  const todayStr = `${String(today.getDate()).padStart(2,'0')}.${String(today.getMonth()+1).padStart(2,'0')}.${today.getFullYear()}`;
+  const weekEnd = new Date(today); weekEnd.setDate(weekEnd.getDate() + 6);
+  const weekEndStr = `${String(weekEnd.getDate()).padStart(2,'0')}.${String(weekEnd.getMonth()+1).padStart(2,'0')}.${weekEnd.getFullYear()}`;
   const [period,   setPeriod]   = useState("week");
-  const [dateFrom, setDateFrom] = useState("23.06.2026");
-  const [dateTo,   setDateTo]   = useState("29.06.2026");
+  const [dateFrom, setDateFrom] = useState(todayStr);
+  const [dateTo,   setDateTo]   = useState(weekEndStr);
+  const [rows,     setRows]     = useState<BalanceRow[]>([]);
+  const [loading,  setLoading]  = useState(true);
 
-  const rows = getBalanceRows(period, dateFrom, dateTo);
+  useEffect(() => {
+    setLoading(true);
+    const today = new Date();
+    let from: string, to: string;
+    if (period === "week") {
+      const d = new Date(today); d.setDate(d.getDate() - d.getDay() + 1);
+      from = d.toISOString().split('T')[0];
+      const e = new Date(d); e.setDate(e.getDate() + 6);
+      to = e.toISOString().split('T')[0];
+    } else if (period === "month") {
+      from = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-01`;
+      to = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${new Date(today.getFullYear(), today.getMonth()+1, 0).getDate()}`;
+    } else if (period === "quarter") {
+      const qm = Math.floor(today.getMonth() / 3) * 3;
+      from = `${today.getFullYear()}-${String(qm+1).padStart(2,'0')}-01`;
+      to = `${today.getFullYear()}-${String(qm+3).padStart(2,'0')}-${new Date(today.getFullYear(), qm+3, 0).getDate()}`;
+    } else {
+      const parts = dateFrom.split('.'); from = `${parts[2]}-${parts[1]}-${parts[0]}`;
+      const parts2 = dateTo.split('.'); to = `${parts2[2]}-${parts2[1]}-${parts2[0]}`;
+    }
+    api.reports.getBalances({ date_from: from, date_to: to })
+      .then(data => setRows(data as BalanceRow[]))
+      .catch(() => setRows([]))
+      .finally(() => setLoading(false));
+  }, [period, dateFrom, dateTo]);
 
   const handleExport = () => {
     exportCsv(
@@ -672,9 +725,20 @@ function BalanceRow({ row, i }: { row: BalanceRow; i: number }) {
 
 /* ── Tab: План и факт ──────────────────────────────── */
 function PlanFactTab({ onExport }: { onExport: () => void }) {
-  // Default: current month = June 2026
-  const [selMonth, setSelMonth] = useState(5);   // 0-based
-  const [selYear,  setSelYear]  = useState(2026);
+  const [selMonth, setSelMonth] = useState(new Date().getMonth());
+  const [selYear,  setSelYear]  = useState(new Date().getFullYear());
+  const [rows,     setRows]     = useState<{ article: string; budget: number; fact: number }[]>([]);
+  const [loading,  setLoading]  = useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+    const from = `${selYear}-${String(selMonth+1).padStart(2,'0')}-01`;
+    const to = `${selYear}-${String(selMonth+1).padStart(2,'0')}-${new Date(selYear, selMonth+1, 0).getDate()}`;
+    api.reports.getPlanFact({ date_from: from, date_to: to })
+      .then(data => setRows((data as any[]).map(r => ({ article: r.item ?? r.article ?? '', budget: r.budget ?? 0, fact: r.fact ?? 0 }))))
+      .catch(() => setRows([]))
+      .finally(() => setLoading(false));
+  }, [selMonth, selYear]);
 
   const prevMonth = () => {
     if (selMonth === 0) { setSelMonth(11); setSelYear(y => y - 1); }
@@ -688,10 +752,8 @@ function PlanFactTab({ onExport }: { onExport: () => void }) {
   const nextYear  = () => setSelYear(y => y + 1);
   const goToday   = () => { setSelMonth(5); setSelYear(2026); };
 
-  const isToday   = selMonth === 5 && selYear === 2026;
-  const isRealData = !!PLAN_FACT_DATA[planFactKey(selMonth, selYear)];
+  const isToday = selMonth === new Date().getMonth() && selYear === new Date().getFullYear();
 
-  const rows        = getPlanFactRows(selMonth, selYear);
   const totalBudget = rows.reduce((s, r) => s + r.budget, 0);
   const totalFact   = rows.reduce((s, r) => s + r.fact,   0);
   const totalDiff   = totalFact - totalBudget;

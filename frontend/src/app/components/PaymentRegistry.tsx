@@ -48,15 +48,13 @@ const AVAILABLE: AvailableRequest[] = [
 
 function fmtFull(n: number, account = ""): string {
   const currency = getAccountCurrency(account);
-  const prefix = n < 0 ? "−" : "";
-  const s = Math.floor(Math.abs(n)).toString();
-  const parts: string[] = [];
-  for (let i = s.length; i > 0; i -= 3) parts.unshift(s.slice(Math.max(0, i - 3), i));
-  return prefix + formatAmount(Math.abs(n), currency);
+  const rub = n / 100;
+  const prefix = rub < 0 ? "−" : "";
+  return prefix + formatAmount(Math.abs(rub), currency);
 }
 
 function fmtShort(n: number, account = ""): string {
-  return formatAmount(n, getAccountCurrency(account));
+  return formatAmount(n / 100, getAccountCurrency(account));
 }
 
 const STATUS_CFG: Record<RowStatus, { label: string; bg: string; color: string }> = {
@@ -93,7 +91,34 @@ export function PaymentRegistry({
 
   const loadData = () => {
     setLoading(true); setLoadError(null);
-    setTimeout(() => { setRows(INITIAL_ROWS.map(r => ({...r}))); setLoading(false); }, 300);
+    api.registries.getAll()
+      .then(data => {
+        const registries = data as any[];
+        if (registries.length > 0) {
+          // Load the latest registry's details
+          const latest = registries[0];
+          api.registries.getOne(latest.id)
+            .then(detail => {
+              const payments = (detail as any).payments ?? [];
+              setRows(payments.map((p: any) => ({
+                id: p.id,
+                counterparty: p.counterparty ?? '',
+                article: p.article ?? '',
+                amount: p.amount ?? 0,
+                account: p.account ?? '',
+                date: p.date ?? '',
+                priority: p.priority ?? 'medium',
+                status: p.status === 'paid' ? 'paid' as RowStatus : p.status === 'in_registry' ? 'registry' as RowStatus : 'registry' as RowStatus,
+              })));
+            })
+            .catch(() => setRows([]))
+            .finally(() => setLoading(false));
+        } else {
+          setRows([]);
+          setLoading(false);
+        }
+      })
+      .catch(() => { setLoadError("Не удалось загрузить реестр"); setLoading(false); });
   };
   useEffect(() => { loadData(); }, []);
 
@@ -107,9 +132,9 @@ export function PaymentRegistry({
     }).catch(() => setAvailableBalance(992500)); // fallback
   }, []);
 
-  // Computed summary values from real rows
-  const totalToPay   = rows.filter(r => r.status !== "paid").reduce((s, r) => s + r.amount, 0);
-  const totalAll     = rows.reduce((s, r) => s + r.amount, 0);
+  // Computed summary values — rows.amount в копейках, конвертируем в рубли для сравнения
+  const totalToPay   = rows.filter(r => r.status !== "paid").reduce((s, r) => s + r.amount, 0) / 100;
+  const totalAll     = rows.reduce((s, r) => s + r.amount, 0) / 100;
   const deficit      = totalToPay > availableBalance ? totalToPay - availableBalance : 0;
   const [selected,     setSelected]    = useState<Set<number>>(new Set());
   const [hovered,      setHovered]     = useState<number | null>(null);
@@ -128,19 +153,22 @@ export function PaymentRegistry({
   const toggleRow = (id: number) =>
     setSelected(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
 
-  const markAsPaid = () => {
+  const markAsPaid = async () => {
     if (selCount === 0) return;
     const paidRows = rows.filter(r => selected.has(r.id) && r.status !== "paid");
-    setRows(prev => prev.map(r => selected.has(r.id) ? { ...r, status: "paid" as RowStatus } : r));
-    const n = selCount;
-    setSelected(new Set());
-    if (paidRows.length > 0) {
-      onPaymentsPaid?.(paidRows.map(r => ({ dateStr: r.date, amount: r.amount })));
+    if (paidRows.length === 0) return;
+    try {
+      // Находим реестр и оплачиваем через API
+      const registries = await api.registries.getAll() as any[];
+      if (registries.length > 0) {
+        await api.registries.pay(registries[0].id);
+        setRows(prev => prev.map(r => selected.has(r.id) ? { ...r, status: "paid" as RowStatus } : r));
+        showToast(`${paidRows.length} заявок отмечено оплаченными`, "success");
+      }
+    } catch {
+      showToast("Ошибка оплаты реестра", "error");
     }
-    showToast(
-      `${n} заявк${n === 1 ? "а отмечена" : n < 5 ? "и отмечены" : " отмечено"} оплаченными`,
-      "success",
-    );
+    setSelected(new Set());
   };
 
   const handleExcel = () => {
@@ -218,7 +246,8 @@ export function PaymentRegistry({
         </div>
       </div>
 
-      {/* ── B: Summary cards — computed from real rows ── */}
+      {/* ── B: Summary cards — показываем только когда есть заявки ── */}
+      {rows.length > 0 && (
       <div style={{ display: "flex", gap: 16, marginBottom: 20 }}>
         <SummaryCard
           label="Итого к оплате"
@@ -240,6 +269,7 @@ export function PaymentRegistry({
           cardBg={deficit > 0 ? C.danger08 : C.sage10}
         />
       </div>
+      )}
 
       {/* ── Toolbar ── */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>

@@ -88,6 +88,16 @@ class CalendarController extends Controller
                 $openingBalance = $balance;
                 $balance += $incomeTotal - $expenseTotal;
 
+                // Описание дня — краткое содержание движений
+                $descriptions = [];
+                foreach ($dayPayments->take(3) as $p) {
+                    $descriptions[] = '↓ ' . ($p->counterparty->name ?? '') . ': ' . $p->purpose;
+                }
+                foreach ($dayIncomes->take(3) as $inc) {
+                    $descriptions[] = '↑ ' . ($inc->counterparty->name ?? '') . ': ' . $inc->purpose;
+                }
+                $description = implode('; ', $descriptions);
+
                 $result[] = [
                     'date' => $dateString,
                     'account_id' => $account->id,
@@ -97,6 +107,7 @@ class CalendarController extends Controller
                     'expense_total' => $expenseTotal,
                     'closing_balance' => $balance,
                     'has_cash_gap' => $balance < 0,
+                    'description' => $description,
                 ];
             }
         }
@@ -120,6 +131,7 @@ class CalendarController extends Controller
                 'expense_total' => $expenseTotal,
                 'closing_balance' => $closingTotal,
                 'has_cash_gap' => $closingTotal < 0,
+                'description' => '',
             ];
         }
 

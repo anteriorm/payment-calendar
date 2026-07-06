@@ -1,8 +1,10 @@
 import client from "../client";
 import { delay, randomId } from "../mocks/handlers";
 import { mockPayments, type Payment, type PaymentStatus } from "../mocks/data/payments";
+import { mockAccounts } from "../mocks/data/accounts";
+import { mockCounterparties } from "../mocks/data/counterparties";
+import { mockItems } from "../mocks/data/items";
 import { USE_MOCK } from "../../config";
-import { kopecksToRub, rubToKopecks } from "../../app/utils";
 
 export interface PaymentsFilter {
   status?:          PaymentStatus;
@@ -36,6 +38,7 @@ interface ApiPayment {
   updated_at: string;
 }
 
+/** Map API response → Payment. Amount stays in kopecks (no conversion). */
 function mapApiPayment(api: ApiPayment): Payment {
   const accountId = api.account?.id ?? api.account_id ?? 0;
   const accountName = api.account?.name ?? api.account_name ?? "";
@@ -48,7 +51,7 @@ function mapApiPayment(api: ApiPayment): Payment {
 
   return {
     id: api.id,
-    amount: kopecksToRub(api.amount),
+    amount: api.amount,          // kopecks — conversion happens in the component
     planned_date: api.planned_date,
     account_id: accountId,
     account_name: accountName,
@@ -80,9 +83,10 @@ const real = {
     client.get<ApiPayment>(`/payments/${id}`)
       .then(r => mapApiPayment(r.data)),
 
+  /** Caller sends amount in kopecks — no extra conversion here. */
   create: (data: Omit<Payment, "id" | "status" | "created_at" | "updated_at">) => {
     const payload = {
-      amount: rubToKopecks(data.amount),
+      amount: data.amount,
       planned_date: data.planned_date,
       account_id: data.account_id,
       counterparty_id: data.counterparty_id,
@@ -91,25 +95,22 @@ const real = {
       priority: data.priority,
     };
     return client.post<ApiPayment>("/payments", payload)
-      .then(r => {
-        return mapApiPayment(r.data);
-      });
+      .then(r => mapApiPayment(r.data));
   },
 
+  /** Caller sends amount in kopecks — no extra conversion here. */
   update: (id: number, data: Partial<Payment>) => {
     const payload: any = {};
-    if (data.amount !== undefined) payload.amount = rubToKopecks(data.amount);
-    if (data.planned_date !== undefined) payload.planned_date = data.planned_date;
-    if (data.account_id !== undefined) payload.account_id = data.account_id;
+    if (data.amount !== undefined)          payload.amount = data.amount;
+    if (data.planned_date !== undefined)    payload.planned_date = data.planned_date;
+    if (data.account_id !== undefined)      payload.account_id = data.account_id;
     if (data.counterparty_id !== undefined) payload.counterparty_id = data.counterparty_id;
-    if (data.item_id !== undefined) payload.item_id = data.item_id;
-    if (data.purpose !== undefined) payload.purpose = data.purpose;
-    if (data.priority !== undefined) payload.priority = data.priority;
-    if (data.status !== undefined) payload.status = data.status;
+    if (data.item_id !== undefined)         payload.item_id = data.item_id;
+    if (data.purpose !== undefined)         payload.purpose = data.purpose;
+    if (data.priority !== undefined)        payload.priority = data.priority;
+    if (data.status !== undefined)          payload.status = data.status;
     return client.put<ApiPayment>(`/payments/${id}`, payload)
-      .then(r => {
-        return mapApiPayment(r.data);
-      });
+      .then(r => mapApiPayment(r.data));
   },
 
   delete: (id: number) => client.delete(`/payments/${id}`).then(r => r.data),

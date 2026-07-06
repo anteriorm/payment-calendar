@@ -17,7 +17,7 @@ const TABS: { id: TabId; label: string }[] = [
   { id: "currencies",     label: "Валюты"           },
 ];
 
-interface Account { id: number; name: string; currency: string; opening: number; current: number; }
+interface Account { id: number; name: string; type: string; currency: string; opening: number; current: number; }
 
 const INITIAL_ACCOUNTS: Account[] = [
   { id: 1, name: "Расчётный счёт №1", currency: "RUB", opening: 500000, current: 980000 },
@@ -111,32 +111,51 @@ export function References({ canManage = true }: { canManage?: boolean }) {
 /* ── Счета и кассы ─────────────────────────────────── */
 function AccountsTab({ canManage = true }: { canManage?: boolean }) {
   const { showToast } = useToast();
-  const [accounts,   setAccounts]   = useState<Account[]>(INITIAL_ACCOUNTS);
+  const [accounts,   setAccounts]   = useState<Account[]>([]);
+  const [loading,    setLoading]    = useState(true);
   const [editTarget, setEditTarget] = useState<Account | null>(null);
   const [showModal,  setShowModal]  = useState(false);
   const [delTarget,  setDelTarget]  = useState<Account | null>(null);
+
+  useEffect(() => {
+    api.accounts.getAll()
+      .then(data => setAccounts(data as Account[]))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
 
   const openAdd  = () => { setEditTarget(null); setShowModal(true); };
   const openEdit = (acc: Account) => { setEditTarget(acc); setShowModal(true); };
   const openDel  = (acc: Account) => setDelTarget(acc);
 
-  const handleSave = (data: { name: string; currency: string; opening: number }) => {
+  const handleSave = async (data: { name: string; type: string; currency: string; opening: number }) => {
     registerAccountCurrency(data.name, data.currency);
-    if (editTarget) {
-      setAccounts(prev => prev.map(a => a.id === editTarget.id ? { ...a, ...data } : a));
-      showToast("Счёт успешно обновлён", "success");
-    } else {
-      const newAcc: Account = { id: Date.now(), ...data, current: data.opening };
-      setAccounts(prev => [...prev, newAcc]);
-      showToast("Счёт добавлен", "success");
+    const payload = { name: data.name, type: data.type, currency: data.currency, opening: Math.round(data.opening * 100) };
+    try {
+      if (editTarget) {
+        await api.accounts.update(editTarget.id, payload);
+        setAccounts(prev => prev.map(a => a.id === editTarget.id ? { ...a, ...payload } : a));
+        showToast("Счёт успешно обновлён", "success");
+      } else {
+        const created = await api.accounts.create(payload) as any;
+        setAccounts(prev => [...prev, created]);
+        showToast("Счёт добавлен", "success");
+      }
+    } catch {
+      showToast("Ошибка сохранения", "error");
     }
     setShowModal(false);
   };
 
-  const handleDelete = () => {
+  const handleDelete = async () => {
     if (!delTarget) return;
-    setAccounts(prev => prev.filter(a => a.id !== delTarget.id));
-    showToast(`Счёт «${delTarget.name}» удалён`, "error");
+    try {
+      await api.accounts.delete(delTarget.id);
+      setAccounts(prev => prev.filter(a => a.id !== delTarget.id));
+      showToast(`Счёт «${delTarget.name}» удалён`, "success");
+    } catch {
+      showToast("Ошибка удаления", "error");
+    }
     setDelTarget(null);
   };
 
@@ -167,8 +186,8 @@ function AccountsTab({ canManage = true }: { canManage?: boolean }) {
             <Tr key={row.id} i={i}>
               <Td bold>{row.name}</Td>
               <Td>{row.currency}</Td>
-              <Td mono>{ruFmt(row.opening)} {currencySymbol(row.currency)}</Td>
-              <Td mono color={row.current < 50000 ? C.danger : C.textDk}>{ruFmt(row.current)} {currencySymbol(row.currency)}</Td>
+              <Td mono>{ruFmt(row.opening / 100)} {currencySymbol(row.currency)}</Td>
+              <Td mono color={row.current / 100 < 50000 ? C.danger : C.textDk}>{ruFmt(row.current / 100)} {currencySymbol(row.currency)}</Td>
               <Td><ActiveBadge /></Td>
               <Td>
                 {canManage ? (
@@ -214,12 +233,13 @@ function AccountsTab({ canManage = true }: { canManage?: boolean }) {
 /* ── Account modal ─────────────────────────────────── */
 interface AccountModalProps {
   initial: Account | null;
-  onSave:  (data: { name: string; currency: string; opening: number }) => void;
+  onSave:  (data: { name: string; type: string; currency: string; opening: number }) => void;
   onClose: () => void;
 }
 
 function AccountModal({ initial, onSave, onClose }: AccountModalProps) {
   const [name,     setName]     = useState(initial?.name     ?? "");
+  const [type,     setType]     = useState(initial?.type     ?? "bank");
   const [currency, setCurrency] = useState(initial?.currency ?? "RUB");
   const [opening,  setOpening]  = useState(initial ? String(initial.opening) : "");
   const [focused,  setFocused]  = useState<string | null>(null);
@@ -252,7 +272,7 @@ function AccountModal({ initial, onSave, onClose }: AccountModalProps) {
     if (openErr) e.opening = openErr;
     if (Object.keys(e).length) { setErrors(e); return; }
     const n = parseFloat(opening.replace(/\s/g, "").replace(",", ".")) || 0;
-    onSave({ name: name.trim(), currency, opening: n });
+    onSave({ name: name.trim(), type, currency, opening: n });
   };
 
   return (
@@ -281,6 +301,16 @@ function AccountModal({ initial, onSave, onClose }: AccountModalProps) {
               onFocus={() => setFocused("name")} onBlur={() => setFocused(null)}
               style={{ ...base, ...focusStyle("name"), ...(errors.name ? {border:`1.5px solid ${C.danger}`} : {}) }} />
             {errors.name && <ErrSpan>{errors.name}</ErrSpan>}
+          </div>
+
+          {/* Тип */}
+          <div>
+            <FieldLabel>Тип</FieldLabel>
+            <div style={{ display: "flex", gap: 8 }}>
+              {[["bank", "Банковский счёт"], ["cash", "Касса"]].map(([v, l]) => (
+                <button key={v} onClick={() => setType(v)} style={{ flex: 1, padding: "9px 0", borderRadius: 6, border: type === v ? `2px solid ${C.sage}` : `1px solid ${C.warm}`, background: type === v ? C.sage10 : C.surface, color: type === v ? C.sage : C.textLt, fontSize: 13, fontWeight: type === v ? 600 : 400, cursor: "pointer", fontFamily: "Inter, sans-serif" }}>{l}</button>
+              ))}
+            </div>
           </div>
 
           {/* Валюта */}
@@ -372,17 +402,40 @@ function ConfirmDialog({
 
 /* ── Other tabs (read-only) ────────────────────────── */
 /* ── Контрагенты (full CRUD) ─────────────────────────── */
-interface Counterparty { id: number; name: string; inn: string; type: string; contact: string; }
+interface Counterparty { id: number; name: string; inn: string; kpp: string; account: string; bank: string; bik: string; type: string; contact: string; }
 
 function CounterpartiesTab({ canManage = true }: { canManage?: boolean }) {
   const { showToast } = useToast();
-  const [rows,    setRows]    = useState<Counterparty[]>(COUNTERPARTIES.map(r => ({ ...r })));
+  const [rows,    setRows]    = useState<Counterparty[]>([]);
+  const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<Counterparty | null>(null);
   const [showAdd, setShowAdd] = useState(false);
   const [delTgt,  setDelTgt]  = useState<Counterparty | null>(null);
-  const save = (r: Counterparty) => {
-    if (r.id < 0) { setRows(p => [...p, { ...r, id: Date.now() }]); showToast("Контрагент добавлен", "success"); }
-    else          { setRows(p => p.map(x => x.id === r.id ? r : x)); showToast("Контрагент обновлён", "success"); }
+
+  useEffect(() => {
+    api.counterparties.getAll()
+      .then(data => setRows(data as Counterparty[]))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  const save = async (r: Counterparty) => {
+    // Map frontend fields to backend fields
+    const backendType = r.type === "Юр. лицо" ? "entity" : r.type === "ИП" ? "individual" : "entity";
+    const payload = { name: r.name, inn: r.inn, kpp: r.kpp, bank_account: r.account, bank_name: r.bank, bik: r.bik, type: backendType, contact: r.contact };
+    try {
+      if (r.id < 0) {
+        const created = await api.counterparties.create(payload as any) as any;
+        setRows(p => [...p, { ...r, id: created.id }]);
+        showToast("Контрагент добавлен", "success");
+      } else {
+        await api.counterparties.update(r.id, payload as any);
+        setRows(p => p.map(x => x.id === r.id ? r : x));
+        showToast("Контрагент обновлён", "success");
+      }
+    } catch {
+      showToast("Ошибка сохранения", "error");
+    }
     setEditing(null); setShowAdd(false);
   };
   return (
@@ -395,11 +448,11 @@ function CounterpartiesTab({ canManage = true }: { canManage?: boolean }) {
         )}
       </TableToolbar>
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-        <thead><tr style={{ background: C.hdr }}>{["Наименование","ИНН","Тип","Контакт","Действия"].map(c => <Th key={c}>{c}</Th>)}</tr></thead>
+        <thead><tr style={{ background: C.hdr }}>{["Наименование","ИНН","КПП","Р/счёт","Банк","БИК","Тип","Контакт","Действия"].map(c => <Th key={c}>{c}</Th>)}</tr></thead>
         <tbody>
           {rows.map((row, i) => (
             <Tr key={row.id} i={i}>
-              <Td bold>{row.name}</Td><Td mono>{row.inn}</Td><Td>{row.type}</Td><Td>{row.contact}</Td>
+              <Td bold>{row.name}</Td><Td mono>{row.inn}</Td><Td mono>{row.kpp}</Td><Td mono>{row.account}</Td><Td>{row.bank}</Td><Td mono>{row.bik}</Td><Td>{row.type}</Td><Td>{row.contact}</Td>
               <Td><div style={{ display: "flex", gap: 6 }}>
                 {canManage ? <>
                   <IconBtn title="Редактировать" hoverColor={C.sage} onClick={() => setEditing(row)}><Pencil size={14} /></IconBtn>
@@ -412,13 +465,21 @@ function CounterpartiesTab({ canManage = true }: { canManage?: boolean }) {
       </table>
       {(showAdd || editing) && <CpModal initial={editing} onSave={save} onClose={() => { setEditing(null); setShowAdd(false); }} />}
       {delTgt && <ConfirmDialog title="Удалить контрагента?" message={`«${delTgt.name}» будет удалён.`} confirmLabel="Удалить" confirmColor={C.danger}
-        onConfirm={() => { setRows(p => p.filter(x => x.id !== delTgt!.id)); showToast("Контрагент удалён", "error"); setDelTgt(null); }} onCancel={() => setDelTgt(null)} />}
+        onConfirm={async () => {
+          try { await api.counterparties.delete(delTgt.id); setRows(p => p.filter(x => x.id !== delTgt!.id)); showToast("Контрагент удалён", "success"); }
+          catch { showToast("Ошибка удаления", "error"); }
+          setDelTgt(null);
+        }} onCancel={() => setDelTgt(null)} />}
     </>
   );
 }
 function CpModal({ initial, onSave, onClose }: { initial: Counterparty | null; onSave: (r: Counterparty) => void; onClose: () => void }) {
   const [name, setName] = useState(initial?.name ?? "");
   const [inn,  setInn]  = useState(initial?.inn  ?? "");
+  const [kpp,  setKpp]  = useState(initial?.kpp  ?? "");
+  const [acc,  setAcc]  = useState(initial?.account ?? "");
+  const [bank, setBank] = useState(initial?.bank ?? "");
+  const [bik,  setBik]  = useState(initial?.bik  ?? "");
   const [type, setType] = useState(initial?.type ?? "Юр. лицо");
   const [ctc,  setCtc]  = useState(initial?.contact ?? "");
   const [errors, setErrors] = useState<Record<string,string>>({});
@@ -429,11 +490,11 @@ function CpModal({ initial, onSave, onClose }: { initial: Counterparty | null; o
   const handleSave = () => {
     const e: Record<string,string> = {};
     const nameErr = required(name, "Наименование обязательно");
-    const innErr  = inn.trim() ? validateInn(inn) : null;  // ИНН опционален для Физ. лица
+    const innErr  = inn.trim() ? validateInn(inn) : null;
     if (nameErr) e.name = nameErr;
     if (innErr)  e.inn  = innErr;
     if (Object.keys(e).length) { setErrors(e); return; }
-    onSave({ id: initial?.id ?? -1, name: name.trim(), inn, type, contact: ctc });
+    onSave({ id: initial?.id ?? -1, name: name.trim(), inn, kpp, account: acc, bank, bik, type, contact: ctc });
   };
 
   return (
@@ -454,6 +515,10 @@ function CpModal({ initial, onSave, onClose }: { initial: Counterparty | null; o
             <input value={inn} onChange={e => { setInn(e.target.value); setErrors(p => ({...p, inn:""})); }} style={{ ...inp, ...(errors.inn ? errBorder : {}) }} placeholder="7701234567" />
             {errors.inn && <ErrSpan>{errors.inn}</ErrSpan>}
           </div>
+          <div><FieldLabel>КПП</FieldLabel><input value={kpp} onChange={e => setKpp(e.target.value)} style={inp} placeholder="770101001" /></div>
+          <div><FieldLabel>Расчётный счёт</FieldLabel><input value={acc} onChange={e => setAcc(e.target.value)} style={inp} placeholder="40702810400000000001" /></div>
+          <div><FieldLabel>Банк</FieldLabel><input value={bank} onChange={e => setBank(e.target.value)} style={inp} placeholder="ПАО Сбербанк" /></div>
+          <div><FieldLabel>БИК</FieldLabel><input value={bik} onChange={e => setBik(e.target.value)} style={inp} placeholder="044525225" /></div>
           <div><FieldLabel>Тип</FieldLabel>
             <div style={{ display: "flex", gap: 8 }}>{["Юр. лицо","ИП","Физ. лицо"].map(t => (
               <button key={t} onClick={() => setType(t)} style={{ flex: 1, padding: "8px 0", borderRadius: 6, border: type === t ? `2px solid ${C.sage}` : `1px solid ${C.warm}`, background: type === t ? C.sage10 : C.surface, color: type === t ? C.sage : C.textLt, fontSize: 12, fontWeight: type === t ? 600 : 400, cursor: "pointer", fontFamily: "Inter, sans-serif" }}>{t}</button>
@@ -475,13 +540,35 @@ interface Article { id: number; code: string; name: string; type: string; group:
 
 function ArticlesTab({ canManage = true }: { canManage?: boolean }) {
   const { showToast } = useToast();
-  const [rows,    setRows]    = useState<Article[]>(ARTICLES.map(r => ({ ...r })));
+  const [rows,    setRows]    = useState<Article[]>([]);
+  const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<Article | null>(null);
   const [showAdd, setShowAdd] = useState(false);
   const [delTgt,  setDelTgt]  = useState<Article | null>(null);
-  const save = (r: Article) => {
-    if (r.id < 0) { setRows(p => [...p, { ...r, id: Date.now() }]); showToast("Статья добавлена", "success"); }
-    else          { setRows(p => p.map(x => x.id === r.id ? r : x)); showToast("Статья обновлена", "success"); }
+
+  useEffect(() => {
+    api.items.getAll()
+      .then(data => setRows(data as Article[]))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  const save = async (r: Article) => {
+    const backendType = r.type === "Доход" ? "income" : "payment";
+    const payload = { code: r.code, name: r.name, type: backendType, group: r.group };
+    try {
+      if (r.id < 0) {
+        const created = await api.items.create(payload as any) as any;
+        setRows(p => [...p, { ...r, id: created.id }]);
+        showToast("Статья добавлена", "success");
+      } else {
+        await api.items.update(r.id, payload as any);
+        setRows(p => p.map(x => x.id === r.id ? r : x));
+        showToast("Статья обновлена", "success");
+      }
+    } catch {
+      showToast("Ошибка сохранения", "error");
+    }
     setEditing(null); setShowAdd(false);
   };
   return (
@@ -511,13 +598,13 @@ function ArticlesTab({ canManage = true }: { canManage?: boolean }) {
       </table>
       {(showAdd || editing) && <ArtModal initial={editing} onSave={save} onClose={() => { setEditing(null); setShowAdd(false); }} />}
       {delTgt && <ConfirmDialog title="Удалить статью?" message={`«${delTgt.name}» будет удалена.`} confirmLabel="Удалить" confirmColor={C.danger}
-        onConfirm={() => { setRows(p => p.filter(x => x.id !== delTgt!.id)); showToast("Статья удалена", "error"); setDelTgt(null); }} onCancel={() => setDelTgt(null)} />}
+        onConfirm={async () => { try { await api.items.delete(delTgt.id); setRows(p => p.filter(x => x.id !== delTgt!.id)); showToast("Статья удалена", "success"); } catch { showToast("Ошибка удаления", "error"); } setDelTgt(null); }} onCancel={() => setDelTgt(null)} />}
     </>
   );
 }
 function ArtModal({ initial, onSave, onClose }: { initial: Article | null; onSave: (r: Article) => void; onClose: () => void }) {
   const [code, setCode] = useState(initial?.code ?? ""); const [name, setName] = useState(initial?.name ?? "");
-  const [type, setType] = useState(initial?.type ?? "Расход"); const [group, setGroup] = useState(initial?.group ?? "");
+  const [type, setType] = useState(initial?.type === "income" ? "Доход" : initial?.type === "payment" ? "Расход" : "Расход"); const [group, setGroup] = useState(initial?.group ?? "");
   const inp: CSSProperties = { width: "100%", padding: "9px 12px", borderRadius: 6, background: C.surface, border: `1px solid ${C.warm}`, fontSize: 14, color: C.textDk, outline: "none", fontFamily: "Inter, sans-serif", boxSizing: "border-box" };
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: C.overlay, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, fontFamily: "Inter, sans-serif" }}>
@@ -558,13 +645,37 @@ interface AppUser { id: number; name: string; login: string; role: string; statu
 
 function UsersTab({ canManage = true }: { canManage?: boolean }) {
   const { showToast } = useToast();
-  const [rows,    setRows]    = useState<AppUser[]>(USERS.map(r => ({ ...r })));
+  const [rows,    setRows]    = useState<AppUser[]>([]);
+  const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<AppUser | null>(null);
   const [showAdd, setShowAdd] = useState(false);
   const [delTgt,  setDelTgt]  = useState<AppUser | null>(null);
-  const save = (r: AppUser) => {
-    if (r.id < 0) { setRows(p => [...p, { ...r, id: Date.now() }]); showToast("Пользователь добавлен", "success"); }
-    else          { setRows(p => p.map(x => x.id === r.id ? r : x)); showToast("Пользователь обновлён", "success"); }
+
+  useEffect(() => {
+    const roleMap: Record<string, string> = { admin: "Администратор", initiator: "Инициатор", manager: "Согласующий", treasurer: "Казначей" };
+    api.users.getAll()
+      .then(data => setRows((data as any[]).map(u => ({ id: u.id, name: u.name, login: u.email ?? u.login ?? '', role: roleMap[u.role] ?? u.role, status: 'active' }))))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  const save = async (r: AppUser & { password?: string }) => {
+    const roleMap: Record<string, string> = { "Инициатор": "initiator", "Согласующий": "manager", "Казначей": "treasurer", "Наблюдатель": "initiator" };
+    const payload: any = { name: r.name, email: r.login, role: roleMap[r.role] ?? "initiator" };
+    if (r.password) payload.password = r.password;
+    try {
+      if (r.id < 0) {
+        const created = await api.users.create(payload) as any;
+        setRows(p => [...p, { id: created.id, name: created.name, login: created.email ?? '', role: r.role, status: 'active' }]);
+        showToast("Пользователь добавлен", "success");
+      } else {
+        await api.users.update(r.id, payload);
+        setRows(p => p.map(x => x.id === r.id ? { ...x, name: r.name, login: r.login, role: r.role } : x));
+        showToast("Пользователь обновлён", "success");
+      }
+    } catch {
+      showToast("Ошибка сохранения", "error");
+    }
     setEditing(null); setShowAdd(false);
   };
   const toggleStatus = (id: number) => setRows(p => p.map(x => x.id === id ? { ...x, status: x.status === "active" ? "inactive" : "active" } : x));
@@ -598,15 +709,21 @@ function UsersTab({ canManage = true }: { canManage?: boolean }) {
       </table>
       {(showAdd || editing) && <UserModal initial={editing} onSave={save} onClose={() => { setEditing(null); setShowAdd(false); }} />}
       {delTgt && <ConfirmDialog title="Удалить пользователя?" message={`«${delTgt.name}» будет удалён.`} confirmLabel="Удалить" confirmColor={C.danger}
-        onConfirm={() => { setRows(p => p.filter(x => x.id !== delTgt!.id)); showToast("Пользователь удалён", "error"); setDelTgt(null); }} onCancel={() => setDelTgt(null)} />}
+        onConfirm={async () => {
+          try { await api.users.delete(delTgt.id); setRows(p => p.filter(x => x.id !== delTgt!.id)); showToast("Пользователь удалён", "success"); }
+          catch { showToast("Ошибка удаления", "error"); }
+          setDelTgt(null);
+        }} onCancel={() => setDelTgt(null)} />}
     </>
   );
 }
-function UserModal({ initial, onSave, onClose }: { initial: AppUser | null; onSave: (r: AppUser) => void; onClose: () => void }) {
-  const [name,   setName]   = useState(initial?.name   ?? "");
-  const [login,  setLogin]  = useState(initial?.login  ?? "");
-  const [role,   setRole]   = useState(initial?.role   ?? "Инициатор");
-  const [status, setStatus] = useState(initial?.status ?? "active");
+function UserModal({ initial, onSave, onClose }: { initial: AppUser | null; onSave: (r: AppUser & { password?: string }) => void; onClose: () => void }) {
+  const [name,     setName]     = useState(initial?.name     ?? "");
+  const [login,    setLogin]    = useState(initial?.login    ?? "");
+  const [password, setPassword] = useState("");
+  const roleMapInit: Record<string, string> = { admin: "Наблюдатель", initiator: "Инициатор", manager: "Согласующий", treasurer: "Казначей" };
+  const [role,     setRole]     = useState(roleMapInit[initial?.role ?? ""] ?? "Инициатор");
+  const [status,   setStatus]   = useState(initial?.status   ?? "active");
   const inp: CSSProperties = { width: "100%", padding: "9px 12px", borderRadius: 6, background: C.surface, border: `1px solid ${C.warm}`, fontSize: 14, color: C.textDk, outline: "none", fontFamily: "Inter, sans-serif", boxSizing: "border-box" };
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: C.overlay, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, fontFamily: "Inter, sans-serif" }}>
@@ -617,7 +734,8 @@ function UserModal({ initial, onSave, onClose }: { initial: AppUser | null; onSa
         </div>
         <div style={{ padding: "18px 24px", display: "flex", flexDirection: "column", gap: 14 }}>
           <div><FieldLabel>ФИО</FieldLabel><input value={name} onChange={e => setName(e.target.value)} style={inp} placeholder="Иванова Мария С." /></div>
-          <div><FieldLabel>Логин</FieldLabel><input value={login} onChange={e => setLogin(e.target.value)} style={inp} placeholder="m.ivanova" /></div>
+          <div><FieldLabel>Email (логин)</FieldLabel><input value={login} onChange={e => setLogin(e.target.value)} style={inp} placeholder="m.ivanova@company.ru" /></div>
+          <div><FieldLabel>Пароль{initial ? " (оставьте пустым, чтобы не менять)" : ""}</FieldLabel><input type="password" value={password} onChange={e => setPassword(e.target.value)} style={inp} placeholder={initial ? "••••••" : "минимум 6 символов"} /></div>
           <div><FieldLabel>Роль</FieldLabel>
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>{["Инициатор","Согласующий","Казначей","Наблюдатель"].map(r => (
               <button key={r} onClick={() => setRole(r)} style={{ padding: "7px 12px", borderRadius: 6, border: role === r ? `2px solid ${C.sage}` : `1px solid ${C.warm}`, background: role === r ? C.sage10 : C.surface, color: role === r ? C.sage : C.textLt, fontSize: 12, fontWeight: role === r ? 600 : 400, cursor: "pointer", fontFamily: "Inter, sans-serif" }}>{r}</button>
@@ -633,10 +751,11 @@ function UserModal({ initial, onSave, onClose }: { initial: AppUser | null; onSa
           <button onClick={() => {
             const errs: string[] = [];
             if (!name.trim())  errs.push("ФИО обязательно");
-            if (!login.trim()) errs.push("Логин обязателен");
-            else if (loginFormat(login)) errs.push(loginFormat(login)!);
+            if (!login.trim()) errs.push("Email обязателен");
+            if (!initial && !password.trim()) errs.push("Пароль обязателен");
+            if (password && password.length < 6) errs.push("Пароль минимум 6 символов");
             if (errs.length) { alert(errs.join("\n")); return; }
-            onSave({ id: initial?.id ?? -1, name: name.trim(), login: login.trim(), role, status });
+            onSave({ id: initial?.id ?? -1, name: name.trim(), login: login.trim(), role, status, password: password || undefined });
           }} style={{ padding: "9px 20px", borderRadius: 6, background: C.sage, color: C.surface, border: "none", fontSize: 14, fontWeight: 500, cursor: "pointer", fontFamily: "Inter, sans-serif" }}>Сохранить</button>
           <button onClick={onClose} style={{ padding: "9px 12px", borderRadius: 6, background: "transparent", color: C.olive, border: "none", fontSize: 14, cursor: "pointer", fontFamily: "Inter, sans-serif", marginLeft: "auto" }}>Отмена</button>
         </div>

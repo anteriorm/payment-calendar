@@ -25,11 +25,11 @@ class IncomeSeeder extends Seeder
         }
 
         $data = [
-            ['amount' => 65000000, 'date' => Carbon::now()->subDays(5), 'acc' => 0, 'cp' => 2, 'item' => 0, 'purpose' => 'Аванс по договору №12', 'status' => 'received'],
-            ['amount' => 12000000, 'date' => Carbon::now()->subDays(3), 'acc' => 1, 'cp' => 6, 'item' => 0, 'purpose' => 'Оплата счёта № 145', 'status' => 'received'],
-            ['amount' => 28000000, 'date' => Carbon::now()->addDays(2), 'acc' => 0, 'cp' => 5, 'item' => 0, 'purpose' => 'Оплата за услуги июнь', 'status' => 'confirmed'],
-            ['amount' => 4500000,  'date' => Carbon::now()->addDays(4), 'acc' => 1, 'cp' => 6, 'item' => 1, 'purpose' => 'Возврат переплаты', 'status' => 'planned'],
-            ['amount' => 3200000,  'date' => Carbon::now()->addDays(7), 'acc' => 2, 'cp' => 4, 'item' => 1, 'purpose' => 'Проценты по депозиту', 'status' => 'planned'],
+            ['amount' => 65000000, 'date' => Carbon::now(), 'acc' => 0, 'cp' => 2, 'item' => 0, 'purpose' => 'Аванс по договору №12', 'status' => 'received'],
+            ['amount' => 12000000, 'date' => Carbon::now()->addDay(), 'acc' => 1, 'cp' => 6, 'item' => 0, 'purpose' => 'Оплата счёта № 145', 'status' => 'confirmed'],
+            ['amount' => 28000000, 'date' => Carbon::now()->addDays(3), 'acc' => 0, 'cp' => 5, 'item' => 0, 'purpose' => 'Оплата за услуги июль', 'status' => 'planned'],
+            ['amount' => 4500000,  'date' => Carbon::now()->addDays(5), 'acc' => 1, 'cp' => 6, 'item' => 1, 'purpose' => 'Возврат переплаты', 'status' => 'planned'],
+            ['amount' => 3200000,  'date' => Carbon::now()->addDays(8), 'acc' => 2, 'cp' => 4, 'item' => 1, 'purpose' => 'Проценты по депозиту', 'status' => 'planned'],
         ];
 
         foreach ($data as $d) {

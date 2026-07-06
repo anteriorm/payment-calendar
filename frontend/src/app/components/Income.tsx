@@ -2,10 +2,10 @@ import { useState, useEffect, type CSSProperties, type ReactNode } from "react";
 import { TableSkeleton, TableError } from "./TableSkeleton";
 import { ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
 import * as api from "../../api";
-import { Search, ChevronDown, Edit2, Trash2, FolderOpen, X, BarChart2 } from "lucide-react";
+import { Search, ChevronDown, Edit2, Trash2, FolderOpen, X, BarChart2, CheckCircle, ThumbsUp } from "lucide-react";
 import { C } from "../tokens";
 import { useToast } from "./Toast";
-import { exportCsv, kopecksToRub, rubToKopecks, formatRubFromRub, getAccountCurrency, formatAmount } from "../utils";
+import { exportCsv, kopecksToRub, rubToKopecks, formatRubFromRub, getAccountCurrency, formatAmount, registerAccountCurrency } from "../utils";
 import { required, positiveAmount, dateRu } from "../utils/validation";
 
 type IncomeStatus = "planned" | "confirmed" | "received";
@@ -30,16 +30,7 @@ const STATUS_CFG: Record<IncomeStatus, { bg: string; color: string; label: strin
   received:  { ...C.badge.received,  label: "Получено"     },
 };
 
-const ROWS: IncomeRow[] = [
-  { id: 2303, counterparty: "ПАО Инвестбанк",    article: "Прочие доходы",       purpose: "Проценты по депозиту",   amount: 32000,  date: "30.06.2026", account: "Касса",        status: "planned",   priority: "low"    },
-  { id: 2302, counterparty: "ИП Коваленко Д.М.", article: "Прочие доходы",       purpose: "Возврат переплаты",      amount: 45000,  date: "26.06.2026", account: "Расчётный №2", status: "planned",   priority: "medium" },
-  { id: 2301, counterparty: "ООО Альфа-Трейд",   article: "Выручка от клиентов", purpose: "Оплата за услуги июнь",  amount: 280000, date: "25.06.2026", account: "Расчётный №1", status: "confirmed", priority: "high"   },
-  { id: 2304, counterparty: "АО СтройИнвест",    article: "Выручка от клиентов", purpose: "Частичная оплата дог.7", amount: 185000, date: "24.06.2026", account: "Расчётный №1", status: "confirmed", priority: "high"   },
-  { id: 2300, counterparty: "АО СтройГрупп",     article: "Выручка от клиентов", purpose: "Аванс по договору №12",  amount: 650000, date: "20.06.2026", account: "Расчётный №1", status: "received",  priority: "high"   },
-  { id: 2299, counterparty: "ООО ЛогистикПро",   article: "Выручка от клиентов", purpose: "Оплата счёта № 145",     amount: 120000, date: "18.06.2026", account: "Расчётный №2", status: "received",  priority: "medium" },
-];
-
-const COLS = "40px 56px 1fr 120px 130px 120px 82px 100px 80px 120px 90px";
+const COLS = "40px 56px minmax(100px,1fr) 120px 130px 120px 82px 100px 80px 120px 110px";
 
 /** Плановое → Подтверждено → Получено (по жизненному циклу поступления) */
 const INCOME_STATUS_ORDER: Record<IncomeStatus, number> = {
@@ -100,6 +91,7 @@ export function Income({ onCreateIncome, canCreate = true }: IncomeProps) {
   const [editTarget, setEditTarget] = useState<IncomeRow | null>(null);
   const [delTarget,  setDelTarget]  = useState<IncomeRow | null>(null);
   const [showCreate, setShowCreate] = useState(false);
+  const [showImport, setShowImport] = useState(false);
 
   // ----- Загрузка справочников -----
   const [accounts, setAccounts] = useState<any[]>([]);
@@ -117,6 +109,7 @@ export function Income({ onCreateIncome, canCreate = true }: IncomeProps) {
         setAccounts(acc);
         setCounterparties(cp);
         setItems(it);
+        (acc as any[]).forEach(a => registerAccountCurrency(a.name, a.currency));
       } catch (e) {
         console.error('Не удалось загрузить справочники', e);
       }
@@ -149,10 +142,13 @@ export function Income({ onCreateIncome, canCreate = true }: IncomeProps) {
     setSearch(""); setStatusF(""); setAccountF(""); setDateFrom(""); setDateTo("");
   };
 
-  const handleDelete = () => {
+  const handleDelete = async () => {
     if (!delTarget) return;
-    setRows(prev => prev.filter(r => r.id !== delTarget.id));
-    showToast(`Поступление № ${delTarget.id} удалено`, "error");
+    try {
+      await api.incomes.delete(delTarget.id);
+      setRows(prev => prev.filter(r => r.id !== delTarget.id));
+      showToast(`Поступление № ${delTarget.id} удалено`, "success");
+    } catch { showToast("Ошибка удаления", "error"); }
     setDelTarget(null);
   };
 
@@ -178,10 +174,26 @@ export function Income({ onCreateIncome, canCreate = true }: IncomeProps) {
     setSelected(new Set());
   };
 
+  const normalizeAcc = (s: string) => s.replace(/\s*счёт\s*/i, " ").replace(/\s+/g, " ").trim();
+
   const filtered = rows.filter(r => {
     if (search   && !r.counterparty.toLowerCase().includes(search.toLowerCase())) return false;
     if (statusF  && r.status  !== statusF)  return false;
-    if (accountF && r.account !== accountF) return false;
+    if (accountF && normalizeAcc(r.account) !== normalizeAcc(accountF)) return false;
+    if (dateFrom) {
+      const [d, m, y] = dateFrom.split('.');
+      const from = new Date(+y, +m - 1, +d);
+      const [rd, rm, ry] = r.date.split('.');
+      const rowDate = new Date(+ry, +rm - 1, +rd);
+      if (rowDate < from) return false;
+    }
+    if (dateTo) {
+      const [d, m, y] = dateTo.split('.');
+      const to = new Date(+y, +m - 1, +d);
+      const [rd, rm, ry] = r.date.split('.');
+      const rowDate = new Date(+ry, +rm - 1, +rd);
+      if (rowDate > to) return false;
+    }
     return true;
   });
 
@@ -253,7 +265,7 @@ export function Income({ onCreateIncome, canCreate = true }: IncomeProps) {
             Создать поступление
           </button>
         )}
-        <button onClick={handleExportSelected} style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 14px", borderRadius: 6, background: "transparent", color: C.olive, border: `1.5px solid ${C.olive}`, fontSize: 13, fontWeight: 500, cursor: "pointer", fontFamily: "Inter, sans-serif", flexShrink: 0 }}>
+        <button onClick={() => setShowImport(true)} style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 14px", borderRadius: 6, background: "transparent", color: C.olive, border: `1.5px solid ${C.olive}`, fontSize: 13, fontWeight: 500, cursor: "pointer", fontFamily: "Inter, sans-serif", flexShrink: 0 }}>
           <FolderOpen size={14} />
           Импорт из Excel
         </button>
@@ -343,6 +355,18 @@ export function Income({ onCreateIncome, canCreate = true }: IncomeProps) {
                 </div>
                 <div style={{ padding: "10px 8px", display: "flex", alignItems: "center", gap: 4 }}>
                   <IconBtn title="Редактировать" hoverColor={C.sage} onClick={() => setEditTarget(row)}><Edit2 size={14} /></IconBtn>
+                  {row.status === "planned" && (
+                    <IconBtn title="Подтвердить" hoverColor={C.sage} onClick={async () => {
+                      try { await api.incomes.markConfirmed(row.id); showToast("Поступление подтверждено", "success"); loadData(); }
+                      catch { showToast("Ошибка подтверждения", "error"); }
+                    }}><ThumbsUp size={14} /></IconBtn>
+                  )}
+                  {(row.status === "planned" || row.status === "confirmed") && (
+                    <IconBtn title="Отметить как полученное" hoverColor={C.sage} onClick={async () => {
+                      try { await api.incomes.markReceived(row.id); showToast("Поступление получено", "success"); loadData(); }
+                      catch { showToast("Ошибка", "error"); }
+                    }}><CheckCircle size={14} /></IconBtn>
+                  )}
                   {isPlanned && <IconBtn title="Удалить" hoverColor={C.danger} onClick={() => setDelTarget(row)}><Trash2 size={14} /></IconBtn>}
                 </div>
               </div>
@@ -356,15 +380,15 @@ export function Income({ onCreateIncome, canCreate = true }: IncomeProps) {
           )}
         </div>
 
-        {/* Summary bar */}
+        {/* Summary bar — calculated from actual data */}
         <div style={{ marginTop: 12, padding: "12px 16px", background: C.surface, border: `1px solid ${C.warm}`, borderRadius: 8, display: "flex", gap: 32, alignItems: "center" }}>
-          <SumCard label="Плановые поступления" value="357 000 ₽" color={C.textLt} />
+          <SumCard label="Плановые поступления" value={ruFmt(rows.filter(r => r.status === "planned").reduce((s, r) => s + r.amount, 0)) + " ₽"} color={C.textLt} />
           <div style={{ width: 1, height: 28, background: C.warm }} />
-          <SumCard label="Подтверждено" value="465 000 ₽" color="#3D6B3D" />
+          <SumCard label="Подтверждено" value={ruFmt(rows.filter(r => r.status === "confirmed").reduce((s, r) => s + r.amount, 0)) + " ₽"} color="#3D6B3D" />
           <div style={{ width: 1, height: 28, background: C.warm }} />
-          <SumCard label="Получено" value="770 000 ₽" color={C.sage} />
+          <SumCard label="Получено" value={ruFmt(rows.filter(r => r.status === "received").reduce((s, r) => s + r.amount, 0)) + " ₽"} color={C.sage} />
           <div style={{ width: 1, height: 28, background: C.warm }} />
-          <SumCard label="Итого" value="1 592 000 ₽" color={C.textDk} bold />
+          <SumCard label="Итого" value={ruFmt(rows.reduce((s, r) => s + r.amount, 0)) + " ₽"} color={C.textDk} bold />
         </div>
       </div>
 
@@ -390,9 +414,22 @@ export function Income({ onCreateIncome, canCreate = true }: IncomeProps) {
       {showCreate && (
         <IncomeFormModal
           initial={null}
-          onSave={data => {
-            setRows(prev => [{ ...data, id: Math.max(0, ...prev.map(r => r.id)) + 1, status: "planned" as IncomeStatus }, ...prev]);
-            showToast("Поступление создано", "success");
+          counterparties={counterparties}
+          items={items}
+          accounts={accounts}
+          onSave={async data => {
+            try {
+              const created = await api.incomes.create({
+                amount: rubToKopecks(data.amount),
+                planned_date: data.date.split('.').reverse().join('-'),
+                account_id: accounts.find(a => a.name === data.account)?.id ?? 0,
+                counterparty_id: counterparties.find(c => c.name === data.counterparty)?.id ?? 0,
+                item_id: items.find(i => i.name === data.article)?.id ?? 0,
+                purpose: data.purpose,
+              } as any);
+              showToast("Поступление создано", "success");
+              loadData();
+            } catch { showToast("Ошибка создания", "error"); }
             setShowCreate(false);
           }}
           onClose={() => setShowCreate(false)}
@@ -403,9 +440,22 @@ export function Income({ onCreateIncome, canCreate = true }: IncomeProps) {
       {editTarget && (
         <IncomeFormModal
           initial={editTarget}
-          onSave={data => {
-            setRows(prev => prev.map(r => r.id === editTarget.id ? { ...data, id: r.id, status: r.status } : r));
-            showToast("Поступление обновлено", "success");
+          counterparties={counterparties}
+          items={items}
+          accounts={accounts}
+          onSave={async data => {
+            try {
+              await api.incomes.update(editTarget.id, {
+                amount: rubToKopecks(data.amount),
+                planned_date: data.date.split('.').reverse().join('-'),
+                account_id: accounts.find(a => a.name === data.account)?.id ?? 0,
+                counterparty_id: counterparties.find(c => c.name === data.counterparty)?.id ?? 0,
+                item_id: items.find(i => i.name === data.article)?.id ?? 0,
+                purpose: data.purpose,
+              } as any);
+              showToast("Поступление обновлено", "success");
+              loadData();
+            } catch { showToast("Ошибка обновления", "error"); }
             setEditTarget(null);
           }}
           onClose={() => setEditTarget(null)}
@@ -415,6 +465,14 @@ export function Income({ onCreateIncome, canCreate = true }: IncomeProps) {
       {/* ── Delete confirm ── */}
       {delTarget && (
         <IncomeConfirmDelete row={delTarget} onConfirm={handleDelete} onCancel={() => setDelTarget(null)} />
+      )}
+
+      {/* ── Import modal ── */}
+      {showImport && (
+        <IncomeImportModal
+          onClose={() => setShowImport(false)}
+          onImported={() => { setShowImport(false); loadData(); showToast("Импорт завершён", "success"); }}
+        />
       )}
     </div>
   );
@@ -472,10 +530,13 @@ const INCOME_PRIORITY_CFG: Record<IncomePriority, { dot: string; label: string; 
   low:    { dot: C.sage,   label: "Низкий",  accent: C.sage,    bg: C.sage10                 },
 };
 
-function IncomeFormModal({ initial, onSave, onClose }: {
+function IncomeFormModal({ initial, onSave, onClose, counterparties, items, accounts }: {
   initial: IncomeRow | null;
   onSave: (data: IncomeFormData) => void;
   onClose: () => void;
+  counterparties: any[];
+  items: any[];
+  accounts: any[];
 }) {
   const [counterparty, setCp]      = useState(initial?.counterparty ?? "");
   const [article,      setArt]     = useState(initial?.article      ?? "");
@@ -511,7 +572,12 @@ function IncomeFormModal({ initial, onSave, onClose }: {
         </div>
         <div style={{ padding: "18px 24px", display: "flex", flexDirection: "column", gap: 14 }}>
           <div style={{ display: "flex", gap: 12 }}>
-            <div style={{ flex: 1 }}><FLabel>Контрагент</FLabel><input value={counterparty} onChange={e => setCp(e.target.value)} style={inp} placeholder="ООО Альфа-Трейд" /></div>
+            <div style={{ flex: 1 }}><FLabel>Контрагент</FLabel>
+              <select value={counterparty} onChange={e => setCp(e.target.value)} style={{ ...inp, appearance: "none", cursor: "pointer" }}>
+                <option value="">Выберите контрагента</option>
+                {counterparties.map((c: any) => <option key={c.id} value={c.name}>{c.name}</option>)}
+              </select>
+            </div>
             <div style={{ flex: "0 0 140px" }}><FLabel>Сумма ({getAccountCurrency(account) || "RUB"})</FLabel>
               <div style={{ position: "relative" }}>
                 <input value={amount} onChange={e => { setAmt(e.target.value); setErrors(p => ({...p, amount:""})); }} style={{ ...inp, paddingRight: 28, ...(errors.amount ? {border:`1.5px solid ${C.danger}`} : {}) }} placeholder="0" />
@@ -520,7 +586,12 @@ function IncomeFormModal({ initial, onSave, onClose }: {
             </div>
           </div>
           <div style={{ display: "flex", gap: 12 }}>
-            <div style={{ flex: 1 }}><FLabel>Статья</FLabel><input value={article} onChange={e => setArt(e.target.value)} style={inp} placeholder="Выручка от клиентов" /></div>
+            <div style={{ flex: 1 }}><FLabel>Статья</FLabel>
+              <select value={article} onChange={e => setArt(e.target.value)} style={{ ...inp, appearance: "none", cursor: "pointer" }}>
+                <option value="">Выберите статью</option>
+                {items.filter((i: any) => i.type === "income").map((i: any) => <option key={i.id} value={i.name}>{i.name}</option>)}
+              </select>
+            </div>
             <div style={{ flex: "0 0 130px" }}><FLabel>Дата</FLabel>
               <input value={date} onChange={e => { setDate(e.target.value); setErrors(p => ({...p, date:""})); }} style={{ ...inp, ...(errors.date ? {border:`1.5px solid ${C.danger}`} : {}) }} />
               {errors.date && <span style={{ fontSize: 11, color: C.danger, marginTop: 3, display: "block" }}>{errors.date}</span>}
@@ -530,9 +601,7 @@ function IncomeFormModal({ initial, onSave, onClose }: {
           <div><FLabel>Счёт</FLabel>
             <select value={account} onChange={e => setAcc(e.target.value)} style={{ ...inp, appearance: "none", cursor: "pointer" }}>
               <option value="">Выберите счёт</option>
-              <option value="Расчётный №1">Расчётный №1</option>
-              <option value="Расчётный №2">Расчётный №2</option>
-              <option value="Касса">Касса</option>
+              {accounts.map((a: any) => <option key={a.id} value={a.name}>{a.name} ({a.currency})</option>)}
             </select>
           </div>
           <div>
@@ -600,6 +669,60 @@ function SumCard({ label, value, color, bold }: { label: string; value: string; 
         ↑ {value}
       </span>
       <span style={{ fontSize: 9, color: C.textLt, opacity: 0.65 }}>RUB-экв.</span>
+    </div>
+  );
+}
+
+/* ── Import Modal ───────────────────────────────────── */
+function IncomeImportModal({ onClose, onImported }: { onClose: () => void; onImported: () => void }) {
+  const { showToast } = useToast();
+  const [file, setFile] = useState<File | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [errors, setErrors] = useState<string[]>([]);
+
+  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    if (f) { setFile(f); setErrors([]); }
+  };
+
+  const handleImport = async () => {
+    if (!file) return;
+    setLoading(true);
+    try {
+      const result = await api.incomes.import(file);
+      if (result.errors?.length) setErrors(result.errors);
+      else onImported();
+      showToast(result.message ?? "Импорт завершён", "success");
+    } catch {
+      showToast("Ошибка импорта", "error");
+    }
+    setLoading(false);
+  };
+
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: C.overlay, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1100, fontFamily: "Inter, sans-serif" }}>
+      <div onClick={e => e.stopPropagation()} style={{ width: 480, background: C.surface, border: `1px solid ${C.warm}`, borderRadius: 12, overflow: "hidden", boxShadow: "0 4px 24px rgba(44,44,30,0.18)" }}>
+        <div style={{ padding: "18px 24px 14px", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: `1px solid ${C.warm}` }}>
+          <h2 style={{ fontSize: 16, fontWeight: 600, color: C.textDk, margin: 0 }}>Импорт поступлений из CSV</h2>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: C.textLt, display: "flex" }}><X size={17} /></button>
+        </div>
+        <div style={{ padding: "18px 24px" }}>
+          <p style={{ fontSize: 12, color: C.textLt, marginBottom: 12 }}>Формат: дата;счёт;контрагент;статья;сумма;назначение (разделитель — точка с запятой)</p>
+          <input type="file" accept=".csv,.txt" onChange={handleFile} style={{ fontSize: 13, color: C.textDk }} />
+          {file && <p style={{ fontSize: 12, color: C.sage, marginTop: 8 }}>Выбран: {file.name}</p>}
+          {errors.length > 0 && (
+            <div style={{ marginTop: 12, padding: 10, background: C.danger12, borderRadius: 6, maxHeight: 120, overflow: "auto" }}>
+              {errors.map((e, i) => <p key={i} style={{ fontSize: 11, color: C.danger, margin: "2px 0" }}>{e}</p>)}
+            </div>
+          )}
+        </div>
+        <div style={{ padding: "14px 24px", display: "flex", gap: 10, borderTop: `1px solid ${C.warm}` }}>
+          <button onClick={handleImport} disabled={!file || loading} style={{ padding: "9px 20px", borderRadius: 6, background: file ? C.sage : C.warm, color: C.surface, border: "none", fontSize: 14, fontWeight: 500, cursor: file ? "pointer" : "not-allowed", fontFamily: "Inter, sans-serif" }}>
+            {loading ? "Импорт…" : "Импортировать"}
+          </button>
+          <button onClick={onClose} style={{ padding: "9px 12px", borderRadius: 6, background: "transparent", color: C.olive, border: "none", fontSize: 14, cursor: "pointer", fontFamily: "Inter, sans-serif", marginLeft: "auto" }}>Отмена</button>
+        </div>
+      </div>
     </div>
   );
 }
