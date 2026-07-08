@@ -176,7 +176,7 @@ export function AuditScreen() {
       ) : (
         <div style={{ background: C.surface, border: `1px solid ${C.warm}`, borderRadius: 10, overflow: "hidden" }}>
           {/* Header */}
-          <div style={{ display: "grid", gridTemplateColumns: "160px 150px 100px 140px 1fr 1fr", background: C.ivory50, borderBottom: `1px solid ${C.warm}` }}>
+          <div style={{ display: "grid", gridTemplateColumns: "160px 150px 100px 180px minmax(150px, 1fr) 1fr", background: C.ivory50, borderBottom: `1px solid ${C.warm}` }}>
             {["Дата и время", "Пользователь", "Роль", "Действие", "Объект", "Детали"].map(col => (
               <div key={col} style={{ padding: "9px 12px", fontWeight: 600, color: C.textDk, fontSize: 12 }}>{col}</div>
             ))}
@@ -194,7 +194,7 @@ export function AuditScreen() {
               <div key={e.id}
                 onMouseEnter={() => setHovered(e.id)}
                 onMouseLeave={() => setHovered(null)}
-                style={{ display: "grid", gridTemplateColumns: "160px 150px 100px 140px 1fr 1fr", background: bg, transition: "background 0.1s", borderBottom: `1px solid rgba(0,0,0,0.05)` }}>
+                style={{ display: "grid", gridTemplateColumns: "160px 150px 100px 180px minmax(150px, 1fr) 1fr", background: bg, transition: "background 0.1s", borderBottom: `1px solid rgba(0,0,0,0.05)` }}>
                 <div style={{ padding: "9px 12px", fontSize: 12, color: C.textLt, fontVariantNumeric: "tabular-nums" }}>{e.timestamp}</div>
                 <div style={{ padding: "9px 12px", fontSize: 12, color: C.textDk, fontWeight: 500 }}>{e.user_name}</div>
                 <div style={{ padding: "9px 12px", fontSize: 12, color: C.textLt }}>{e.user_role}</div>

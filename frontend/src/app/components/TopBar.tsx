@@ -1,44 +1,24 @@
-import { useState, useRef, useEffect, type ComponentType } from "react";
-import { Bell, User, Settings, LogOut, AlertTriangle, CheckCircle, Mail, Palette } from "lucide-react";
+import { useState, useRef, useEffect } from "react";
+import { User, LogOut, Palette } from "lucide-react";
 import { C, THEMES, applyTheme, currentTheme, type ThemeKey } from "../tokens";
 import { useAuth, ROLE_LABELS } from "../context/AuthContext";
 
 interface TopBarProps {
   title:           string;
   onOpenProfile?:  () => void;
-  onOpenSettings?: () => void;
 }
 
-const NOTIFICATIONS = [
-  { id: 1, type: "danger" as const, icon: AlertTriangle, text: "Кассовый разрыв 24 июня: −270 000 ₽",           time: "10 мин назад", read: false },
-  { id: 2, type: "success" as const, icon: CheckCircle,  text: "Заявка № 2845 согласована",                      time: "43 мин назад", read: false },
-  { id: 3, type: "info" as const,   icon: Mail,          text: "Новая заявка № 2848 от Иванова М.С.",             time: "1 ч назад",    read: true  },
-];
-
-const NOTIF_TYPE_COLORS = {
-  danger:  { icon: C.danger,  bg: C.danger12 },
-  success: { icon: C.sage,    bg: C.sage10   },
-  info:    { icon: C.olive,   bg: C.olive20  },
-};
-
-export function TopBar({ title, onOpenProfile, onOpenSettings }: TopBarProps) {
+export function TopBar({ title, onOpenProfile }: TopBarProps) {
   const { user, logout } = useAuth();
-  const [showNotif,   setShowNotif]   = useState(false);
   const [showProfile, setShowProfile] = useState(false);
-  const [readIds,     setReadIds]     = useState<Set<number>>(new Set());
   const [theme,       setTheme]       = useState<ThemeKey>(currentTheme());
   const [showTheme,   setShowTheme]   = useState(false);
   const themeRef = useRef<HTMLDivElement>(null);
 
-  const notifRef   = useRef<HTMLDivElement>(null);
   const profileRef = useRef<HTMLDivElement>(null);
 
-  const unread = NOTIFICATIONS.filter(n => !n.read && !readIds.has(n.id)).length;
-
-  // Close dropdowns on outside click
   useEffect(() => {
     function handleClick(e: MouseEvent) {
-      if (notifRef.current   && !notifRef.current.contains(e.target as Node))   setShowNotif(false);
       if (profileRef.current && !profileRef.current.contains(e.target as Node)) setShowProfile(false);
       if (themeRef.current   && !themeRef.current.contains(e.target as Node))   setShowTheme(false);
     }
@@ -46,15 +26,8 @@ export function TopBar({ title, onOpenProfile, onOpenSettings }: TopBarProps) {
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
 
-  const openNotif = () => {
-    setShowNotif(v => !v);
-    setShowProfile(false);
-    // Mark all as read when opening
-    setReadIds(new Set(NOTIFICATIONS.map(n => n.id)));
-  };
   const openProfile = () => {
     setShowProfile(v => !v);
-    setShowNotif(false);
   };
 
   return (
@@ -128,27 +101,6 @@ export function TopBar({ title, onOpenProfile, onOpenSettings }: TopBarProps) {
           )}
         </div>
 
-        {/* Notifications bell */}
-        <div ref={notifRef} style={{ position: "relative" }}>
-          <button onClick={openNotif}
-            style={{ background: "none", border: "none", cursor: "pointer", color: showNotif ? C.sage : C.textLt, padding: 4, display: "flex", alignItems: "center", borderRadius: 6, transition: "color 0.15s" }}>
-            <Bell size={18} />
-            {unread > 0 && (
-              <span style={{ position: "absolute", top: 0, right: 0, width: 14, height: 14, borderRadius: "50%", background: C.danger, color: "#fff", fontSize: 9, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", border: `2px solid ${C.surface}` }}>
-                {unread}
-              </span>
-            )}
-          </button>
-
-          {showNotif && (
-            <NotifDropdown
-              notifications={NOTIFICATIONS}
-              readIds={readIds}
-              typeColors={NOTIF_TYPE_COLORS}
-            />
-          )}
-        </div>
-
         {/* Profile avatar */}
         <div ref={profileRef} style={{ position: "relative" }}>
           <div onClick={openProfile}
@@ -166,7 +118,6 @@ export function TopBar({ title, onOpenProfile, onOpenSettings }: TopBarProps) {
               {/* Menu items */}
               {[
                 { icon: User,     label: "Мой профиль", action: () => { setShowProfile(false); onOpenProfile?.();  } },
-                { icon: Settings, label: "Настройки",   action: () => { setShowProfile(false); onOpenSettings?.(); } },
               ].map(({ icon: Icon, label, action }) => (
                 <button key={label} onClick={action}
                   style={{ width: "100%", display: "flex", alignItems: "center", gap: 10, padding: "10px 16px", background: "transparent", border: "none", cursor: "pointer", color: C.textDk, fontSize: 13, fontFamily: "Inter, sans-serif", textAlign: "left" }}
@@ -189,93 +140,5 @@ export function TopBar({ title, onOpenProfile, onOpenSettings }: TopBarProps) {
         </div>
       </div>
     </header>
-  );
-}
-
-/* ── NotifDropdown ─────────────────────────────────────────
- * Отдельный компонент чтобы state-hover корректно применял
- * CSS-переменные текущей темы через React state (не element.style).
- * ──────────────────────────────────────────────────────── */
-interface NotifEntry {
-  id: number; type: "danger" | "success" | "info";
-  icon: ComponentType<{ size: number; color?: string }>;
-  text: string; time: string; read: boolean;
-}
-interface TypeColor { icon: string; bg: string; }
-
-function NotifDropdown({
-  notifications, readIds, typeColors,
-}: {
-  notifications: NotifEntry[];
-  readIds:    Set<number>;
-  typeColors: Record<string, TypeColor>;
-}) {
-  const [hoveredId, setHoveredId] = useState<number | null>(null);
-
-  return (
-    <div style={{
-      position: "absolute", top: "calc(100% + 8px)", right: 0,
-      width: 320, background: C.surface, border: `1px solid ${C.warm}`,
-      borderRadius: 8,
-      boxShadow: `0 4px 16px ${C.overlay}`,  /* тема-зависимая тень */
-      zIndex: 300, overflow: "hidden",
-    }}>
-      <div style={{ padding: "12px 16px 10px", borderBottom: `1px solid ${C.warm}`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <span style={{ fontSize: 13, fontWeight: 600, color: C.textDk }}>Уведомления</span>
-        <span style={{ fontSize: 11, color: C.textLt }}>Все прочитаны</span>
-      </div>
-
-      {notifications.map(n => {
-        const Icon  = n.icon;
-        const tc    = typeColors[n.type] as TypeColor;
-        const isNew = !n.read && !readIds.has(n.id);
-        const isHov = hoveredId === n.id;
-
-        /* Цвет фона строки — всё через C.* токены (CSS-переменные) */
-        const rowBg = isHov ? C.beige30 : isNew ? C.sage10 : "transparent";
-
-        return (
-          <div
-            key={n.id}
-            onMouseEnter={() => setHoveredId(n.id)}
-            onMouseLeave={() => setHoveredId(null)}
-            style={{
-              padding: "12px 16px",
-              borderBottom: `1px solid ${C.warm}`,   /* тема-зависимый разделитель */
-              display: "flex", gap: 10,
-              background: rowBg,                     /* тема-зависимый hover */
-              cursor: "pointer",
-              transition: "background 0.1s",
-            }}
-          >
-            {/* Иконка — цвет из активной темы */}
-            <div style={{
-              width: 28, height: 28, borderRadius: "50%",
-              background: tc.bg,                     /* C.sage10 / C.danger12 / C.olive20 */
-              display: "flex", alignItems: "center", justifyContent: "center",
-              flexShrink: 0,
-            }}>
-              <Icon size={13} color={tc.icon} />     {/* C.sage / C.danger / C.olive */}
-            </div>
-
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 13, color: C.textDk, lineHeight: 1.4 }}>{n.text}</div>
-              <div style={{ fontSize: 11, color: C.textLt, marginTop: 3 }}>{n.time}</div>
-            </div>
-
-            {/* Непрочитанная точка — акцентный цвет темы */}
-            {isNew && (
-              <div style={{ width: 7, height: 7, borderRadius: "50%", background: C.sage, flexShrink: 0, marginTop: 5 }} />
-            )}
-          </div>
-        );
-      })}
-
-      <div style={{ padding: "10px 16px", textAlign: "center" }}>
-        <button style={{ background: "none", border: "none", color: C.sage, fontSize: 12, fontWeight: 500, cursor: "pointer", fontFamily: "Inter, sans-serif" }}>
-          Все уведомления
-        </button>
-      </div>
-    </div>
   );
 }

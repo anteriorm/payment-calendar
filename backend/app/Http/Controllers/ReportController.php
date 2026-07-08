@@ -13,6 +13,18 @@ Carbon::setLocale('ru');
 
 class ReportController extends Controller
 {
+    /** Фильтр платежей: активные статусы + активные recurring-шаблоны */
+    private function paymentStatusFilter($query)
+    {
+        return $query->where(function ($q) {
+            $q->whereIn('status', ['pending', 'approved', 'in_registry', 'paid'])
+              ->orWhere(function ($q2) {
+                  $q2->where('recurring', true)
+                     ->where('template_status', '!=', 'paused');
+              });
+        });
+    }
+
     public function balances(Request $request)
     {
         $request->validate([
@@ -43,10 +55,10 @@ class ReportController extends Controller
                 ->whereIn('status', ['planned', 'confirmed', 'received'])
                 ->sum('amount');
 
-            $paymentBefore = Payment::where('account_id', $account->id)
-                ->where('planned_date', '<', $start->toDateString())
-                ->whereIn('status', ['pending', 'approved', 'in_registry', 'paid'])
-                ->sum('amount');
+            $paymentBefore = $this->paymentStatusFilter(
+                Payment::where('account_id', $account->id)
+                    ->where('planned_date', '<', $start->toDateString())
+            )->sum('amount');
 
             $opening += $incomeBefore - $paymentBefore;
 
@@ -56,10 +68,10 @@ class ReportController extends Controller
                 ->whereIn('status', ['planned', 'confirmed', 'received'])
                 ->sum('amount');
 
-            $paymentPeriod = Payment::where('account_id', $account->id)
-                ->whereBetween('planned_date', [$start->toDateString(), $end->toDateString()])
-                ->whereIn('status', ['pending', 'approved', 'in_registry', 'paid'])
-                ->sum('amount');
+            $paymentPeriod = $this->paymentStatusFilter(
+                Payment::where('account_id', $account->id)
+                    ->whereBetween('planned_date', [$start->toDateString(), $end->toDateString()])
+            )->sum('amount');
 
             $closing = $opening + $incomePeriod - $paymentPeriod;
 
@@ -106,9 +118,9 @@ class ReportController extends Controller
             ? Account::where('id', $request->account_id)->get()
             : Account::all();
 
-        $payments = Payment::where('planned_date', '<=', $end->toDateString())
-            ->whereIn('status', ['pending', 'approved', 'in_registry', 'paid'])
-            ->get();
+        $payments = $this->paymentStatusFilter(
+            Payment::where('planned_date', '<=', $end->toDateString())
+        )->get();
 
         $incomes = Income::where('planned_date', '<=', $end->toDateString())
             ->whereIn('status', ['planned', 'confirmed', 'received'])
@@ -197,10 +209,10 @@ class ReportController extends Controller
 
         foreach ($items as $item) {
             if ($item->type === 'payment') {
-                $budget = Payment::where('item_id', $item->id)
-                    ->whereBetween('planned_date', [$start->toDateString(), $end->toDateString()])
-                    ->whereIn('status', ['pending', 'approved', 'in_registry'])
-                    ->sum('amount');
+                $budget = $this->paymentStatusFilter(
+                    Payment::where('item_id', $item->id)
+                        ->whereBetween('planned_date', [$start->toDateString(), $end->toDateString()])
+                )->sum('amount');
 
                 $fact = Payment::where('item_id', $item->id)
                     ->whereBetween('planned_date', [$start->toDateString(), $end->toDateString()])

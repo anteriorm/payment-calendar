@@ -32,22 +32,38 @@ class CalendarController extends Controller
             return response()->json(['message' => 'No accounts found'], 404);
         }
 
-        $paymentQuery = Payment::where('planned_date', '<=', $end->toDateString())
-            ->whereIn('status', ['pending', 'approved', 'in_registry', 'paid']);
-        $incomeQuery = Income::where('planned_date', '<=', $end->toDateString())
+        $endStr = $end->toDateString();
+
+        // Обычные платежи (не recurring)
+        $regularPayments = Payment::where('recurring', false)
+            ->whereIn('status', ['pending', 'approved', 'in_registry', 'paid'])
+            ->where('planned_date', '<=', $endStr)
+            ->with('counterparty')
+            ->get();
+
+        // Recurring-шаблоны (активные, next_date в диапазоне)
+        $recurringPayments = Payment::where('recurring', true)
+            ->where('template_status', 'active')
+            ->whereNotNull('next_date')
+            ->where('next_date', '<=', $endStr)
+            ->with('counterparty')
+            ->get();
+
+        $payments = $regularPayments->merge($recurringPayments);
+
+        $incomeQuery = Income::where('planned_date', '<=', $endStr)
             ->whereIn('status', ['planned', 'confirmed', 'received']);
 
         if ($request->filled('item_id')) {
-            $paymentQuery->where('item_id', $request->item_id);
+            $payments = $payments->filter(fn($p) => $p->item_id == $request->item_id);
             $incomeQuery->where('item_id', $request->item_id);
         }
         if ($request->filled('counterparty_id')) {
-            $paymentQuery->where('counterparty_id', $request->counterparty_id);
+            $payments = $payments->filter(fn($p) => $p->counterparty_id == $request->counterparty_id);
             $incomeQuery->where('counterparty_id', $request->counterparty_id);
         }
 
-        $payments = $paymentQuery->get();
-        $incomes = $incomeQuery->get();
+        $incomes = $incomeQuery->with('counterparty')->get();
 
         $result = [];
         $dates = [];
@@ -91,10 +107,12 @@ class CalendarController extends Controller
                 // Описание дня — краткое содержание движений
                 $descriptions = [];
                 foreach ($dayPayments->take(3) as $p) {
-                    $descriptions[] = '↓ ' . ($p->counterparty->name ?? '') . ': ' . $p->purpose;
+                    $cpName = $p->counterparty?->name ?? '';
+                    $descriptions[] = '↓ ' . ($cpName ? $cpName . ': ' : '') . ($p->purpose ?? '');
                 }
                 foreach ($dayIncomes->take(3) as $inc) {
-                    $descriptions[] = '↑ ' . ($inc->counterparty->name ?? '') . ': ' . $inc->purpose;
+                    $cpName = $inc->counterparty?->name ?? '';
+                    $descriptions[] = '↑ ' . ($cpName ? $cpName . ': ' : '') . ($inc->purpose ?? '');
                 }
                 $description = implode('; ', $descriptions);
 
@@ -112,27 +130,42 @@ class CalendarController extends Controller
             }
         }
 
-        // Сводная строка (итого по всем счетам) для каждой даты
+        // Сводная строка (итого по каждой валюте) для каждой даты
+        $accountCurrencyMap = [];
+        foreach ($accounts as $acc) {
+            $accountCurrencyMap[$acc->id] = $acc->currency;
+        }
+
         foreach ($dates as $dateString) {
             $dayRows = array_filter($result, fn($r) => $r['date'] === $dateString);
             if (empty($dayRows)) continue;
 
-            $openingTotal = array_sum(array_column($dayRows, 'opening_balance'));
-            $incomeTotal = array_sum(array_column($dayRows, 'income_total'));
-            $expenseTotal = array_sum(array_column($dayRows, 'expense_total'));
-            $closingTotal = array_sum(array_column($dayRows, 'closing_balance'));
+            // Группируем по валютам
+            $byCurrency = [];
+            foreach ($dayRows as $row) {
+                $cur = $accountCurrencyMap[$row['account_id']] ?? 'RUB';
+                if (!isset($byCurrency[$cur])) {
+                    $byCurrency[$cur] = ['opening' => 0, 'income' => 0, 'expense' => 0, 'closing' => 0];
+                }
+                $byCurrency[$cur]['opening'] += $row['opening_balance'];
+                $byCurrency[$cur]['income'] += $row['income_total'];
+                $byCurrency[$cur]['expense'] += $row['expense_total'];
+                $byCurrency[$cur]['closing'] += $row['closing_balance'];
+            }
 
-            $result[] = [
-                'date' => $dateString,
-                'account_id' => null,
-                'account_name' => 'Итого',
-                'opening_balance' => $openingTotal,
-                'income_total' => $incomeTotal,
-                'expense_total' => $expenseTotal,
-                'closing_balance' => $closingTotal,
-                'has_cash_gap' => $closingTotal < 0,
-                'description' => '',
-            ];
+            foreach ($byCurrency as $cur => $totals) {
+                $result[] = [
+                    'date' => $dateString,
+                    'account_id' => null,
+                    'account_name' => "Итого ($cur)",
+                    'opening_balance' => $totals['opening'],
+                    'income_total' => $totals['income'],
+                    'expense_total' => $totals['expense'],
+                    'closing_balance' => $totals['closing'],
+                    'has_cash_gap' => $totals['closing'] < 0,
+                    'description' => '',
+                ];
+            }
         }
 
         return response()->json($result);

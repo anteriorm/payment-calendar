@@ -4,10 +4,10 @@ import * as api from "../../api";
 import { BarChart2, Plus, Pencil, Trash2, Search, X, ExternalLink, Calendar, AlertTriangle } from "lucide-react";
 import { useToast } from "./Toast";
 import { C } from "../tokens";
-import { exportCsv, formatRub } from "../utils";
+import { exportCsv, formatRub, getAccountCurrency, getCurrencySymbol } from "../utils";
 
 type Priority = "high" | "medium" | "low";
-type RowStatus = "registry" | "paid" | "no_funds";
+type RowStatus = "registry" | "paid";
 
 interface RegistryRow {
   id:           number;
@@ -29,18 +29,19 @@ interface AvailableRequest {
   priority:     Priority;
 }
 
-function fmtFull(n: number): string {
-  return formatRub(n);
+function fmtFull(n: number, accountName?: string): string {
+  const sym = accountName ? getCurrencySymbol(getAccountCurrency(accountName)) : "₽";
+  return formatRub(n).replace(" ₽", ` ${sym}`);
 }
 
-function fmtShort(n: number): string {
-  return formatRub(n);
+function fmtShort(n: number, accountName?: string): string {
+  const sym = accountName ? getCurrencySymbol(getAccountCurrency(accountName)) : "₽";
+  return formatRub(n).replace(" ₽", ` ${sym}`);
 }
 
 const STATUS_CFG: Record<RowStatus, { label: string; bg: string; color: string }> = {
   registry: { label: "В реестре",   bg: C.badge.inRegistry.bg, color: C.badge.inRegistry.color },
   paid:     { label: "Оплачена",    bg: C.badge.paid.bg,        color: C.badge.paid.color       },
-  no_funds: { label: "Нет средств", bg: C.danger15,             color: "#8B2020"                 },
 };
 
 const PRIORITY_CFG: Record<Priority, { label: string; dot: string; border?: boolean }> = {
@@ -705,7 +706,6 @@ function RegistryEditModal({ row, onSave, onClose }: {
   const STATUS_OPTIONS: { value: RowStatus; label: string }[] = [
     { value: "registry", label: "В реестре"   },
     { value: "paid",     label: "Оплачена"    },
-    { value: "no_funds", label: "Нет средств" },
   ];
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: C.overlay, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1100, fontFamily: "Inter, sans-serif" }}>

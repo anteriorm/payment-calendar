@@ -5,8 +5,10 @@ namespace App\Http\Controllers;
 use App\Models\Account;
 use App\Models\Payment;
 use App\Models\Income;
+use App\Models\Currency;
 use Illuminate\Http\Request;
 use Illuminate\Database\QueryException;
+use Illuminate\Support\Facades\DB;
 use App\Services\AuditService;
 
 class AccountController extends Controller
@@ -18,7 +20,13 @@ class AccountController extends Controller
             ->sum('amount');
 
         $paymentTotal = Payment::where('account_id', $account->id)
-            ->whereIn('status', ['pending', 'approved', 'in_registry', 'paid'])
+            ->where(function ($q) {
+                $q->whereIn('status', ['pending', 'approved', 'in_registry', 'paid'])
+                  ->orWhere(function ($q2) {
+                      $q2->where('recurring', true)
+                         ->where('template_status', '!=', 'paused');
+                  });
+            })
             ->sum('amount');
 
         return [
@@ -80,11 +88,43 @@ class AccountController extends Controller
         }
         unset($validated['opening']);
 
-        $account->update($validated);
+        $oldCurrency = $account->currency;
+        $newCurrency = $validated['currency'] ?? $oldCurrency;
+        $currencyChanged = $newCurrency !== $oldCurrency;
+
+        if ($currencyChanged) {
+            $oldRate = $this->getRate($oldCurrency);
+            $newRate = $this->getRate($newCurrency);
+
+            DB::transaction(function () use ($account, $validated, $oldRate, $newRate) {
+                // Конвертируем все платежи по этому счёту
+                Payment::where('account_id', $account->id)->update([
+                    'amount' => DB::raw("ROUND(amount * {$oldRate} / {$newRate})"),
+                ]);
+
+                // Конвертируем все поступления по этому счёту
+                Income::where('account_id', $account->id)->update([
+                    'amount' => DB::raw("ROUND(amount * {$oldRate} / {$newRate})"),
+                ]);
+
+                $account->update($validated);
+            });
+
+            AuditService::log('account_currency_changed', "Счёт «{$account->name}»", "{$oldCurrency} → {$newCurrency}");
+        } else {
+            $account->update($validated);
+        }
 
         AuditService::log('account_updated', "Счёт «{$account->name}»");
 
         return response()->json($this->formatAccount($account));
+    }
+
+    private function getRate(string $currency): float
+    {
+        if ($currency === 'RUB') return 1;
+        $c = Currency::where('code', $currency)->first();
+        return $c ? (float) $c->rate_to_rub : 1;
     }
 
     public function destroy(Account $account)

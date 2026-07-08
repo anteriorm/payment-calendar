@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, type ReactElement } from "react";
 import { BarChart2, AlertTriangle, ArrowUpRight, Calendar, ChevronDown, Download } from "lucide-react";
 import { useToast } from "./Toast";
 import { C } from "../tokens";
-import { exportCsv, formatRub } from "../utils";
+import { exportCsv, formatRub, getAccountCurrency, getCurrencySymbol } from "../utils";
 import * as api from "../../api";
 
 type TabId = "cashgaps" | "balances" | "planfact" | "exports";
@@ -57,11 +57,13 @@ function fromISO(s: string): string {
   return `${d}.${mo}.${y}`;
 }
 
-function fmtFull(n: number): string {
-  return formatRub(n);
+function fmtFull(n: number, accountName?: string): string {
+  const sym = accountName ? getCurrencySymbol(getAccountCurrency(accountName)) : "₽";
+  return formatRub(n).replace(" ₽", ` ${sym}`);
 }
-function fmtShort(n: number): string {
-  return formatRub(n);
+function fmtShort(n: number, accountName?: string): string {
+  const sym = accountName ? getCurrencySymbol(getAccountCurrency(accountName)) : "₽";
+  return formatRub(n).replace(" ₽", ` ${sym}`);
 }
 
 /* ── Main component ────────────────────────────────── */

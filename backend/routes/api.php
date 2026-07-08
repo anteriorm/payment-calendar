@@ -81,6 +81,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // Валюты
     Route::get('/currencies', [CurrencyController::class, 'index']);
     Route::put('/currencies/{code}/rate', [CurrencyController::class, 'updateRate']);
+    Route::post('/currencies/refresh', [CurrencyController::class, 'refresh']);
 
     // Дашборд
     Route::get('/dashboard', [DashboardController::class, 'index']);

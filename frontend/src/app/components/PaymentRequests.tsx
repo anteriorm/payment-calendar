@@ -213,6 +213,20 @@ export function PaymentRequests({ onCreateRequest, onOpenDetails, refreshKey = 0
     if (search   && !r.counterparty.toLowerCase().includes(search.toLowerCase())) return false;
     if (statusF  && r.status  !== statusF)  return false;
     if (accountF && normalizeAcc(r.account) !== normalizeAcc(accountF)) return false;
+    if (dateFrom) {
+      const [d, m, y] = dateFrom.split('.');
+      const from = new Date(+y, +m - 1, +d);
+      const [rd, rm, ry] = r.date.split('.');
+      const rowDate = new Date(+ry, +rm - 1, +rd);
+      if (rowDate < from) return false;
+    }
+    if (dateTo) {
+      const [d, m, y] = dateTo.split('.');
+      const to = new Date(+y, +m - 1, +d);
+      const [rd, rm, ry] = r.date.split('.');
+      const rowDate = new Date(+ry, +rm - 1, +rd);
+      if (rowDate > to) return false;
+    }
     return true;
   });
 
@@ -272,8 +286,13 @@ export function PaymentRequests({ onCreateRequest, onOpenDetails, refreshKey = 0
         await api.payments.update(data.id, payload);
         showToast('Заявка обновлена', 'success');
       } else {
-        await api.payments.create(payload);
-        showToast(asDraft ? 'Черновик сохранён' : 'Заявка отправлена на согласование', 'success');
+        const created = await api.payments.create(payload) as any;
+        if (!asDraft && created?.id) {
+          await api.payments.submit(created.id);
+          showToast('Заявка отправлена на согласование', 'success');
+        } else {
+          showToast('Черновик сохранён', 'warning');
+        }
       }
       setShowCreateModal(false);
       setEditRequest(null);

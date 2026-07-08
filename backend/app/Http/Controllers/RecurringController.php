@@ -155,10 +155,6 @@ class RecurringController extends Controller
             if ($item) $updateData['item_id'] = $item->id;
         }
 
-        if (isset($validated['name'])) {
-            $updateData['purpose'] = $validated['name'];
-        }
-
         $payment->update($updateData);
         $payment->load(['account', 'counterparty', 'item', 'creator']);
 

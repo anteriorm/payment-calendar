@@ -89,7 +89,7 @@ export function CreateRequestModal({ onClose, initialData, onSave }: CreateReque
 
   useEffect(() => {
     api.items.getAll()
-      .then(data => setArticles((data as any[]).map(i => ({ value: i.name, label: i.name }))))
+      .then(data => setArticles((data as any[]).filter(i => i.type === "payment").map(i => ({ value: i.name, label: i.name }))))
       .catch(() => {});
   }, []);
 

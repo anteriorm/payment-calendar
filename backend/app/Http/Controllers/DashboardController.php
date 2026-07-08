@@ -22,43 +22,49 @@ class DashboardController extends Controller
             ->where('planned_date', '<=', $endGapDate)
             ->get(['account_id', 'planned_date', 'amount']);
 
-        $payments = Payment::whereIn('status', ['pending', 'approved', 'in_registry', 'paid'])
-            ->where('planned_date', '<=', $endGapDate)
+        $payments = Payment::where('planned_date', '<=', $endGapDate)
+            ->where(function ($q) {
+                $q->whereIn('status', ['pending', 'approved', 'in_registry', 'paid'])
+                  ->orWhere(function ($q2) {
+                      $q2->where('recurring', true)
+                         ->where('template_status', '!=', 'paused');
+                  });
+            })
             ->get(['account_id', 'planned_date', 'amount']);
 
         // Группируем движения по account_id для быстрого доступа
         $incomeByAccount = $incomes->groupBy('account_id');
         $paymentByAccount = $payments->groupBy('account_id');
 
-        // Общий остаток на сегодня (без будущих движений)
-        // Вычисляем после определения $calcDayBalance
-
-        // Вспомогательная функция: остаток по всем счетам на дату
+        // Вспомогательная функция: остаток по всем счетам на дату (с разбивкой по валютам)
         $calcDayBalance = function (string $dateStr) use ($accounts, $incomeByAccount, $paymentByAccount) {
-            $dayBalance = 0;
+            $byCurrency = [];
             foreach ($accounts as $account) {
+                $cur = $account->currency;
                 $bal = $account->initial_balance;
                 $accIncomes = $incomeByAccount[$account->id] ?? collect();
                 $accPayments = $paymentByAccount[$account->id] ?? collect();
                 $bal += $accIncomes->filter(fn ($inc) => $inc->planned_date->toDateString() <= $dateStr)->sum('amount');
                 $bal -= $accPayments->filter(fn ($p) => $p->planned_date->toDateString() <= $dateStr)->sum('amount');
-                $dayBalance += $bal;
+                $byCurrency[$cur] = ($byCurrency[$cur] ?? 0) + $bal;
             }
-            return $dayBalance;
+            return $byCurrency;
         };
 
-        // Общий остаток на сегодня
-        $totalBalance = $calcDayBalance($today);
+        // Общий остаток на сегодня (по валютам)
+        $balanceByCurrency = $calcDayBalance($today);
 
         // Ближайший кассовый разрыв (следующие 30 дней)
         $nearestGap = null;
         $currentDate = Carbon::today();
         while ($currentDate->toDateString() <= $endGapDate) {
             $dateStr = $currentDate->toDateString();
-            $dayBal = $calcDayBalance($dateStr);
-            if ($dayBal < 0) {
-                $nearestGap = ['date' => $dateStr, 'amount' => $dayBal];
-                break;
+            $dayBalByCur = $calcDayBalance($dateStr);
+            foreach ($dayBalByCur as $cur => $bal) {
+                if ($bal < 0) {
+                    $nearestGap = ['date' => $dateStr, 'amount' => $bal, 'currency' => $cur];
+                    break 2;
+                }
             }
             $currentDate->addDay();
         }
@@ -66,17 +72,25 @@ class DashboardController extends Controller
         // Заявки на согласовании
         $pendingCount = Payment::where('status', 'pending')->count();
 
-        // Сегодняшние движения
-        $todayPayments = $payments->filter(fn ($p) => $p->planned_date->toDateString() === $today)->sum('amount');
-        $todayIncome = $incomes->filter(fn ($inc) => $inc->planned_date->toDateString() === $today)->sum('amount');
+        // Сегодняшние движения (по валютам)
+        $todayPaymentsByCur = [];
+        $todayIncomeByCur = [];
+        foreach ($accounts as $acc) {
+            $cur = $acc->currency;
+            $dayPay = $paymentByAccount[$acc->id] ?? collect();
+            $dayInc = $incomeByAccount[$acc->id] ?? collect();
+            $todayPaymentsByCur[$cur] = ($todayPaymentsByCur[$cur] ?? 0) + $dayPay->filter(fn ($p) => $p->planned_date->toDateString() === $today)->sum('amount');
+            $todayIncomeByCur[$cur] = ($todayIncomeByCur[$cur] ?? 0) + $dayInc->filter(fn ($inc) => $inc->planned_date->toDateString() === $today)->sum('amount');
+        }
 
-        // График балансов (7 дней)
+        // График балансов (7 дней) — по основной валюте (RUB)
         $chart = [];
         for ($i = 0; $i < 7; $i++) {
             $dateStr = Carbon::today()->addDays($i)->toDateString();
+            $dayBalByCur = $calcDayBalance($dateStr);
             $chart[] = [
                 'date' => Carbon::parse($dateStr)->translatedFormat('j M'),
-                'balance' => $calcDayBalance($dateStr),
+                'balance' => $dayBalByCur,
             ];
         }
 
@@ -101,12 +115,13 @@ class DashboardController extends Controller
 
         return response()->json([
             'summary' => [
-                'totalBalance' => $totalBalance,
+                'totalBalance' => $balanceByCurrency,
                 'nearestGapDate' => $nearestGap ? Carbon::parse($nearestGap['date'])->translatedFormat('j F Y') : null,
                 'nearestGapAmount' => $nearestGap ? $nearestGap['amount'] : 0,
+                'nearestGapCurrency' => $nearestGap ? $nearestGap['currency'] : null,
                 'pendingCount' => $pendingCount,
-                'todayPayments' => $todayPayments,
-                'todayIncome' => $todayIncome,
+                'todayPayments' => $todayPaymentsByCur,
+                'todayIncome' => $todayIncomeByCur,
             ],
             'chart' => $chart,
             'events' => $events,

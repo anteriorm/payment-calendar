@@ -11,17 +11,18 @@ import { kopecksToRub, formatRub } from "../utils";
 import * as api from "../../api";
 
 interface DashboardSummary {
-  totalBalance: number;
+  totalBalance: Record<string, number>;
   nearestGapDate: string | null;
   nearestGapAmount: number;
+  nearestGapCurrency: string | null;
   pendingCount: number;
-  todayPayments: number;
-  todayIncome: number;
+  todayPayments: Record<string, number>;
+  todayIncome: Record<string, number>;
 }
 
 interface ChartPoint {
   date: string;
-  balance: number;
+  balance: Record<string, number>;
 }
 
 interface EventItem {
@@ -41,6 +42,15 @@ function ruFmt2(n: number): string {
   return formatRub(n);
 }
 
+function fmtCurMap(m: Record<string, number> | number | undefined): string {
+  if (!m || typeof m === "number") return ruFmt2(typeof m === "number" ? m : 0) + " ₽";
+  const sym: Record<string, string> = { RUB: "₽", USD: "$", EUR: "€", CNY: "¥", GBP: "£", JPY: "¥", KZT: "₸", BYN: "Br", TRY: "₺", CHF: "₣" };
+  return Object.entries(m)
+    .filter(([, v]) => v !== 0)
+    .map(([c, v]) => `${ruFmt2(v)} ${sym[c] ?? c}`)
+    .join(" / ") || "0 ₽";
+}
+
 export function DashboardScreen() {
   const { user } = useAuth();
   const [loading, setLoading] = useState(true);
@@ -57,7 +67,7 @@ export function DashboardScreen() {
       })
       .catch(() => {
         // fallback на пустые данные
-        setSummary({ totalBalance: 0, nearestGapDate: null, nearestGapAmount: 0, pendingCount: 0, todayPayments: 0, todayIncome: 0 });
+        setSummary({ totalBalance: {}, nearestGapDate: null, nearestGapAmount: 0, nearestGapCurrency: null, pendingCount: 0, todayPayments: {}, todayIncome: {} });
         setChart([]);
         setEvents([]);
       })
@@ -66,7 +76,7 @@ export function DashboardScreen() {
 
   const today = new Date().toLocaleDateString("ru-RU", { day: "numeric", month: "long", year: "numeric", weekday: "long" });
 
-  const s = summary ?? { totalBalance: 0, nearestGapDate: null, nearestGapAmount: 0, pendingCount: 0, todayPayments: 0, todayIncome: 0 };
+  const s = summary ?? { totalBalance: {} as Record<string, number>, nearestGapDate: null, nearestGapAmount: 0, nearestGapCurrency: null, pendingCount: 0, todayPayments: {} as Record<string, number>, todayIncome: {} as Record<string, number> };
 
   return (
     <div
@@ -92,18 +102,20 @@ export function DashboardScreen() {
           <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 14, marginBottom: 24 }}>
             <StatCard
               label="Общий остаток"
-              value={ruFmt2(s.totalBalance)}
+              value={fmtCurMap(s.totalBalance)}
               valueColor={C.sage}
               icon={<TrendingUp size={18} color={C.sage} />}
               bg={C.sage10}
+              showRubNote={false}
             />
             <StatCard
               label="Ближайший разрыв"
-              value={s.nearestGapDate ? ruFmt2(s.nearestGapAmount) : "Нет"}
+              value={s.nearestGapDate ? formatRub(s.nearestGapAmount).replace(" ₽", "") + (s.nearestGapCurrency ? ` ${({RUB:"₽",USD:"$",EUR:"€",CNY:"¥",GBP:"£",JPY:"¥",KZT:"₸",BYN:"Br",TRY:"₺",CHF:"₣"} as Record<string,string>)[s.nearestGapCurrency] ?? s.nearestGapCurrency}` : " ₽") : "Нет"}
               valueColor={C.danger}
               sub={s.nearestGapDate ?? "Разрывов нет"}
               icon={<AlertTriangle size={18} color={C.danger} />}
               bg={C.danger12}
+              showRubNote={false}
             />
             <StatCard
               label="Ожидают согласования"
@@ -116,17 +128,19 @@ export function DashboardScreen() {
             />
             <StatCard
               label="Платежей сегодня"
-              value={ruFmt2(s.todayPayments)}
+              value={fmtCurMap(s.todayPayments)}
               valueColor={C.danger}
               icon={<ArrowDownCircle size={18} color={C.danger} />}
               bg={C.danger08}
+              showRubNote={false}
             />
             <StatCard
               label="Поступлений сегодня"
-              value={ruFmt2(s.todayIncome)}
+              value={fmtCurMap(s.todayIncome)}
               valueColor={C.sage}
               icon={<ArrowUpCircle size={18} color={C.sage} />}
               bg={C.sage10}
+              showRubNote={false}
             />
           </div>
 
@@ -147,9 +161,9 @@ export function DashboardScreen() {
                 <h3 style={{ fontSize: 14, fontWeight: 600, color: C.textDk, margin: 0 }}>
                   Остаток по дням
                 </h3>
-                <span style={{ fontSize: 11, color: C.textLt }}>Итого по всем счетам</span>
+                <span style={{ fontSize: 11, color: C.textLt }}>Остаток в ₽</span>
               </div>
-              <SvgBarChart data={chart.map(c => ({ ...c, balance: kopecksToRub(c.balance) }))} height={220} />
+              <SvgBarChart data={chart.map(c => ({ date: c.date, balance: kopecksToRub(typeof c.balance === "object" ? (c.balance.RUB ?? Object.values(c.balance).reduce((s, v) => s + v, 0)) : c.balance) }))} height={220} />
               <div style={{ display: "flex", gap: 16, marginTop: 8, paddingLeft: 4 }}>
                 <LegendDot color={C.sage}   label="Положительный" />
                 <LegendDot color={C.danger} label="Кассовый разрыв" />
@@ -226,7 +240,7 @@ function SvgBarChart({ data, height }: SvgBarChartProps) {
   if (data.length === 0) return <div style={{ height, display: "flex", alignItems: "center", justifyContent: "center", color: C.textLt, fontSize: 13 }}>Нет данных</div>;
 
   const W       = 520;
-  const PAD_L   = 40;
+  const PAD_L   = 60;
   const PAD_B   = 28;
   const PAD_T   = 8;
   const chartW  = W - PAD_L - 8;

@@ -46,9 +46,18 @@ function ruFmt(n: number): string {
   return parts.join(" ");
 }
 
+/** Конвертация суммы из валюты счёта в RUB */
+function toRub(amount: number, accountName: string, rates: Record<string, number>): number {
+  const cur = getAccountCurrency(accountName);
+  if (cur === "RUB") return amount;
+  return amount * (rates[cur] ?? 1);
+}
+
 interface IncomeProps {
   onCreateIncome?: () => void;
   canCreate?:      boolean;
+  /** Вызывается после создания/обновления поступления — триггер обновления календаря */
+  onCreated?:      () => void;
 }
 
 const PAGE_SIZE_INC = 8;
@@ -72,7 +81,7 @@ function mapApiToIncome(i: Record<string, unknown>): IncomeRow {
   };
 }
 
-export function Income({ onCreateIncome, canCreate = true }: IncomeProps) {
+export function Income({ onCreateIncome, canCreate = true, onCreated }: IncomeProps) {
   const { showToast } = useToast();
   const [rows,       setRows]       = useState<IncomeRow[]>([]);
   const [loading,    setLoading]    = useState(true);
@@ -97,19 +106,24 @@ export function Income({ onCreateIncome, canCreate = true }: IncomeProps) {
   const [accounts, setAccounts] = useState<any[]>([]);
   const [counterparties, setCounterparties] = useState<any[]>([]);
   const [items, setItems] = useState<any[]>([]);
+  const [rates, setRates] = useState<Record<string, number>>({ RUB: 1 });
 
   useEffect(() => {
     const loadRefs = async () => {
       try {
-        const [acc, cp, it] = await Promise.all([
+        const [acc, cp, it, cur] = await Promise.all([
           api.accounts.getAll(),
           api.counterparties.getAll(),
           api.items.getAll(),
+          api.currencies.getAll(),
         ]);
         setAccounts(acc);
         setCounterparties(cp);
         setItems(it);
         (acc as any[]).forEach(a => registerAccountCurrency(a.name, a.currency));
+        const map: Record<string, number> = { RUB: 1 };
+        (cur as any[]).forEach((c: any) => { map[c.code] = c.rate_to_rub; });
+        setRates(map);
       } catch (e) {
         console.error('Не удалось загрузить справочники', e);
       }
@@ -354,7 +368,9 @@ export function Income({ onCreateIncome, canCreate = true }: IncomeProps) {
                   </span>
                 </div>
                 <div style={{ padding: "10px 8px", display: "flex", alignItems: "center", gap: 4 }}>
-                  <IconBtn title="Редактировать" hoverColor={C.sage} onClick={() => setEditTarget(row)}><Edit2 size={14} /></IconBtn>
+                  {isPlanned && (
+                    <IconBtn title="Редактировать" hoverColor={C.sage} onClick={() => setEditTarget(row)}><Edit2 size={14} /></IconBtn>
+                  )}
                   {row.status === "planned" && (
                     <IconBtn title="Подтвердить" hoverColor={C.sage} onClick={async () => {
                       try { await api.incomes.markConfirmed(row.id); showToast("Поступление подтверждено", "success"); loadData(); }
@@ -380,15 +396,15 @@ export function Income({ onCreateIncome, canCreate = true }: IncomeProps) {
           )}
         </div>
 
-        {/* Summary bar — calculated from actual data */}
+        {/* Summary bar — calculated from actual data, converted to RUB */}
         <div style={{ marginTop: 12, padding: "12px 16px", background: C.surface, border: `1px solid ${C.warm}`, borderRadius: 8, display: "flex", gap: 32, alignItems: "center" }}>
-          <SumCard label="Плановые поступления" value={ruFmt(rows.filter(r => r.status === "planned").reduce((s, r) => s + r.amount, 0)) + " ₽"} color={C.textLt} />
+          <SumCard label="Плановые поступления" value={ruFmt(rows.filter(r => r.status === "planned").reduce((s, r) => s + toRub(r.amount, r.account, rates), 0)) + " ₽"} color={C.textLt} />
           <div style={{ width: 1, height: 28, background: C.warm }} />
-          <SumCard label="Подтверждено" value={ruFmt(rows.filter(r => r.status === "confirmed").reduce((s, r) => s + r.amount, 0)) + " ₽"} color="#3D6B3D" />
+          <SumCard label="Подтверждено" value={ruFmt(rows.filter(r => r.status === "confirmed").reduce((s, r) => s + toRub(r.amount, r.account, rates), 0)) + " ₽"} color="#3D6B3D" />
           <div style={{ width: 1, height: 28, background: C.warm }} />
-          <SumCard label="Получено" value={ruFmt(rows.filter(r => r.status === "received").reduce((s, r) => s + r.amount, 0)) + " ₽"} color={C.sage} />
+          <SumCard label="Получено" value={ruFmt(rows.filter(r => r.status === "received").reduce((s, r) => s + toRub(r.amount, r.account, rates), 0)) + " ₽"} color={C.sage} />
           <div style={{ width: 1, height: 28, background: C.warm }} />
-          <SumCard label="Итого" value={ruFmt(rows.reduce((s, r) => s + r.amount, 0)) + " ₽"} color={C.textDk} bold />
+          <SumCard label="Итого (₽-экв.)" value={ruFmt(rows.reduce((s, r) => s + toRub(r.amount, r.account, rates), 0)) + " ₽"} color={C.textDk} bold />
         </div>
       </div>
 
@@ -426,9 +442,11 @@ export function Income({ onCreateIncome, canCreate = true }: IncomeProps) {
                 counterparty_id: counterparties.find(c => c.name === data.counterparty)?.id ?? 0,
                 item_id: items.find(i => i.name === data.article)?.id ?? 0,
                 purpose: data.purpose,
+                priority: data.priority,
               } as any);
               showToast("Поступление создано", "success");
               loadData();
+              onCreated?.();
             } catch { showToast("Ошибка создания", "error"); }
             setShowCreate(false);
           }}
@@ -452,9 +470,11 @@ export function Income({ onCreateIncome, canCreate = true }: IncomeProps) {
                 counterparty_id: counterparties.find(c => c.name === data.counterparty)?.id ?? 0,
                 item_id: items.find(i => i.name === data.article)?.id ?? 0,
                 purpose: data.purpose,
+                priority: data.priority,
               } as any);
               showToast("Поступление обновлено", "success");
               loadData();
+              onCreated?.();
             } catch { showToast("Ошибка обновления", "error"); }
             setEditTarget(null);
           }}

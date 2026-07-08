@@ -16,6 +16,7 @@ let store: Currency[] = [...mockCurrencies];
 const real = {
   getAll:     ()                                    => client.get<Currency[]>("/currencies").then(r => r.data),
   updateRate: (code: string, rate_to_rub: number)  => client.put<Currency>(`/currencies/${code}/rate`, { rate_to_rub }).then(r => r.data),
+  refresh:    ()                                    => client.post<{ message: string }>("/currencies/refresh").then(r => r.data),
 };
 
 const mock = {
@@ -24,6 +25,7 @@ const mock = {
     store = store.map(c => c.code === code ? { ...c, rate_to_rub, updated_at: "02.07.2026" } : c);
     return delay(store.find(c => c.code === code)!);
   },
+  refresh:    ()                                    => delay({ message: "Курсы обновлены (мок)" }),
 };
 
 export const currenciesService = USE_MOCK ? mock : real;

@@ -16,6 +16,7 @@ class Income extends Model
         'counterparty_id',
         'item_id',
         'purpose',
+        'priority',
         'status',
         'created_by',
     ];

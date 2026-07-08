@@ -17,7 +17,6 @@ import { RecurringPayments } from "./components/RecurringPayments";
 import { ToastProvider, useToast } from "./components/Toast";
 import { LoginScreen } from "./components/LoginScreen";
 import { ProfileModal } from "./components/ProfileModal";
-import { SettingsModal } from "./components/SettingsModal";
 import { AuthProvider, useAuth, ROLE_SCREENS, type Screen } from "./context/AuthContext";
 import * as api from "../api";
 
@@ -43,7 +42,6 @@ function AppShell() {
   const [drawerCell,        setDrawerCell]         = useState<SelectedCell | null>(null);
   const [drawerPaymentId,   setDrawerPaymentId]    = useState<number>(2847);
   const [showProfile,       setShowProfile]        = useState(false);
-  const [showSettings,      setShowSettings]       = useState(false);
   const [paidConfirmations,   setPaidConfirmations]  = useState<{ dateStr: string; amount: number }[]>([]);
   const [requestsRefreshKey,  setRequestsRefreshKey]  = useState(0);
 
@@ -100,7 +98,6 @@ function AppShell() {
       <TopBar
         title={SCREEN_TITLES[currentScreen]}
         onOpenProfile={() => setShowProfile(true)}
-        onOpenSettings={() => setShowSettings(true)}
       />
 
       <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
@@ -126,6 +123,7 @@ function AppShell() {
               onRescheduleReady={(fn) => { rescheduleRef.current = fn; }}
               paidConfirmations={paidConfirmations}
               canReschedule={perms.canReschedule}
+              refreshKey={requestsRefreshKey}
             />
           )}
 
@@ -148,7 +146,7 @@ function AppShell() {
             />
           )}
 
-          {currentScreen === "income" && <Income canCreate={perms.canCreateIncome} />}
+          {currentScreen === "income" && <Income canCreate={perms.canCreateIncome} onCreated={() => setRequestsRefreshKey(k => k + 1)} />}
 
           {currentScreen === "registry" && (
             <div style={{ flex: 1, overflowY: "auto" }}>
@@ -195,7 +193,6 @@ function AppShell() {
 
       {showModal && <CreateRequestModal onClose={() => setShowModal(false)} onSave={handleCreateRequestSave} />}
       {showProfile  && <ProfileModal  onClose={() => setShowProfile(false)}  />}
-      {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
     </div>
   );
 }

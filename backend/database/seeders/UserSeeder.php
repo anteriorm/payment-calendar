@@ -11,31 +11,31 @@ class UserSeeder extends Seeder
     public function run()
     {
         User::create([
-            'name' => 'Сидоров А.К.',
-            'email' => 'a.sidorov@truemachine.ru',
+            'name' => 'Сидоров Андрей К.',
+            'email' => 'admin@truemachine.ru',
             'password' => Hash::make('password'),
             'role' => 'admin',
         ]);
 
         User::create([
-            'name' => 'Иванова М.С.',
-            'email' => 'm.ivanova@truemachine.ru',
+            'name' => 'Иванова Мария С.',
+            'email' => 'initiator@truemachine.ru',
             'password' => Hash::make('password'),
             'role' => 'initiator',
         ]);
 
         User::create([
-            'name' => 'Козлова Е.В.',
-            'email' => 'e.kozlova@truemachine.ru',
+            'name' => 'Козлова Елена В.',
+            'email' => 'treasurer@truemachine.ru',
             'password' => Hash::make('password'),
-            'role' => 'manager',
+            'role' => 'treasurer',
         ]);
 
         User::create([
-            'name' => 'Петров И.А.',
-            'email' => 'i.petrov@truemachine.ru',
+            'name' => 'Петров Иван А.',
+            'email' => 'manager@truemachine.ru',
             'password' => Hash::make('password'),
-            'role' => 'treasurer',
+            'role' => 'manager',
         ]);
     }
 }

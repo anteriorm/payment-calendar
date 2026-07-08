@@ -10,9 +10,8 @@ export interface User {
 }
 
 export const mockUsers: User[] = [
-  { id: 1, name: "Иванова М.С.",  email: "m.ivanova@truemachine.ru",  role: "initiator", status: "active"   },
-  { id: 2, name: "Петров И.А.",   email: "i.petrov@truemachine.ru",   role: "treasurer", status: "active"   },
-  { id: 3, name: "Козлова Е.В.",  email: "e.kozlova@truemachine.ru",  role: "manager",   status: "active"   },
-  { id: 4, name: "Сидоров А.К.",  email: "a.sidorov@truemachine.ru",  role: "admin",     status: "active"   },
-  { id: 5, name: "Орлов В.Д.",    email: "v.orlov@truemachine.ru",    role: "initiator", status: "inactive" },
+  { id: 1, name: "Сидоров Андрей К.",  email: "admin@truemachine.ru",      role: "admin",     status: "active" },
+  { id: 2, name: "Иванова Мария С.",   email: "initiator@truemachine.ru",  role: "initiator", status: "active" },
+  { id: 3, name: "Козлова Елена В.",   email: "treasurer@truemachine.ru",  role: "treasurer", status: "active" },
+  { id: 4, name: "Петров Иван А.",     email: "manager@truemachine.ru",    role: "manager",   status: "active" },
 ];

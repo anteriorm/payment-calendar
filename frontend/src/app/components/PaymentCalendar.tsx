@@ -132,13 +132,15 @@ interface PaymentCalendarProps {
   onGoToRegistry?:     () => void;
   onRescheduleReady?:  (fn: (from: string, to: string, amount: number, accKey?: AccKey) => void) => void;
   paidConfirmations?:  PaidConfirmation[];
-  canReschedule?:      boolean;  // разрешение роли на перенос даты
+  canReschedule?:      boolean;
+  /** Увеличивается при создании новой заявки — триггер перезагрузки данных */
+  refreshKey?:         number;
 }
 
 /* ═══════════════════════════════════════════════════════
    PaymentCalendar
 ═══════════════════════════════════════════════════════ */
-export function PaymentCalendar({ onCreateRequest, onSelectRequest, onGoToRegistry, onRescheduleReady, paidConfirmations, canReschedule = false }: PaymentCalendarProps) {
+export function PaymentCalendar({ onCreateRequest, onSelectRequest, onGoToRegistry, onRescheduleReady, paidConfirmations, canReschedule = false, refreshKey = 0 }: PaymentCalendarProps) {
   /* ── Mutable copy of static days (enables reschedule) ── */
   const [mutableDays, setMutableDays] = useState<CalendarDay[]>([]);
   const [accounts, setAccounts] = useState<{key: AccKey; name: string}[]>([]);
@@ -170,9 +172,12 @@ export function PaymentCalendar({ onCreateRequest, onSelectRequest, onGoToRegist
       .catch(() => {});
   }, []);
 
-  const fetchData = (start: string, end: string) => {
+  const fetchData = (start: string, end: string, itemId?: string, cpId?: string) => {
     setLoading(true);
-    api.calendar.get({ start_date: start, end_date: end })
+    const params: any = { start_date: start, end_date: end };
+    if (itemId) params.item_id = itemId;
+    if (cpId) params.counterparty_id = cpId;
+    api.calendar.get(params)
       .then(data => {
         const map = new Map<string, CalendarDay>();
         const accountIds = new Set<number>();
@@ -314,6 +319,15 @@ export function PaymentCalendar({ onCreateRequest, onSelectRequest, onGoToRegist
   /** Фильтр счёта для Month/Quarter grid — "total" = все счета */
   const [gridAccKey,         setGridAccKey]         = useState<AccKey | "total">("total");
 
+  // Dynamic filter options from API
+  const [articleOptions, setArticleOptions] = useState<{id: number; name: string}[]>([]);
+  const [cpOptions, setCpOptions] = useState<{id: number; name: string}[]>([]);
+
+  useEffect(() => {
+    api.items.getAll().then(data => setArticleOptions((data as any[]).map(i => ({ id: i.id, name: i.name })))).catch(() => {});
+    api.counterparties.getAll().then(data => setCpOptions((data as any[]).map(c => ({ id: c.id, name: c.name })))).catch(() => {});
+  }, []);
+
   /* ── Fetch calendar data when period changes ── */
   useEffect(() => {
     const anchorISO = toISO(offsetToDate(dayOffset));
@@ -324,8 +338,8 @@ export function PaymentCalendar({ onCreateRequest, onSelectRequest, onGoToRegist
     else if (period === "month") { const d = new Date(anchorISO + "T12:00:00"); start = toISO(new Date(d.getFullYear(), d.getMonth(), 1)); end = toISO(new Date(d.getFullYear(), d.getMonth() + 1, 0)); }
     else if (period === "quarter") { const d = new Date(anchorISO + "T12:00:00"); const qm = Math.floor(d.getMonth() / 3) * 3; start = toISO(new Date(d.getFullYear(), qm, 1)); end = toISO(new Date(d.getFullYear(), qm + 3, 0)); }
     else { start = fromRu ? toISO(fromRu) : anchorISO; end = toRu ? toISO(toRu) : addDays(anchorISO, 6); }
-    fetchData(start, end);
-  }, [period, dayOffset, customFrom, customTo]);
+    fetchData(start, end, articleFilter || undefined, counterpartyFilter || undefined);
+  }, [period, dayOffset, customFrom, customTo, articleFilter, counterpartyFilter, refreshKey]);
 
   /* ── Derived display state ── */
   const anchor        = offsetToDate(dayOffset);
@@ -649,12 +663,7 @@ export function PaymentCalendar({ onCreateRequest, onSelectRequest, onGoToRegist
               }}
             >
               <option value="">Все</option>
-              <option value="Аренда офиса">Аренда офиса</option>
-              <option value="Заработная плата">Заработная плата</option>
-              <option value="Расходные материалы">Расходные материалы</option>
-              <option value="Услуги подрядчиков">Услуги подрядчиков</option>
-              <option value="Налоги и сборы">Налоги и сборы</option>
-              <option value="Прочие расходы">Прочие расходы</option>
+              {articleOptions.map(a => <option key={a.id} value={a.name}>{a.name}</option>)}
             </select>
             <div style={{ position:"absolute", right:7, top:"50%", transform:"translateY(-50%)", pointerEvents:"none", color: articleFilter ? C.sage : C.textLt, display:"flex" }}>
               <ChevronRight size={11} style={{ transform:"rotate(90deg)" }} />
@@ -689,12 +698,7 @@ export function PaymentCalendar({ onCreateRequest, onSelectRequest, onGoToRegist
               }}
             >
               <option value="">Все</option>
-              <option value="ООО РентаГрупп">ООО РентаГрупп</option>
-              <option value="ИП Смирнов А.В.">ИП Смирнов А.В.</option>
-              <option value="АО ТехСервис">АО ТехСервис</option>
-              <option value="ООО Поставщик Альфа">ООО Поставщик Альфа</option>
-              <option value="ПАО Энергоресурс">ПАО Энергоресурс</option>
-              <option value="ООО ТехСервис">ООО ТехСервис</option>
+              {cpOptions.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
             </select>
             <div style={{ position:"absolute", right:7, top:"50%", transform:"translateY(-50%)", pointerEvents:"none", color: counterpartyFilter ? C.sage : C.textLt, display:"flex" }}>
               <ChevronRight size={11} style={{ transform:"rotate(90deg)" }} />

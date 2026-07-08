@@ -22,6 +22,7 @@ class IncomeController extends Controller
             'item_id' => $income->item_id,
             'item' => $income->item?->name ?? '',
             'purpose' => $income->purpose ?? '',
+            'priority' => $income->priority ?? 'medium',
             'status' => $income->status,
             'created_by' => $income->creator?->name ?? '',
         ];
@@ -66,10 +67,12 @@ class IncomeController extends Controller
             'counterparty_id' => 'required|exists:counterparties,id',
             'item_id' => 'required|exists:items,id',
             'purpose' => 'nullable|string',
+            'priority' => 'sometimes|in:high,medium,low',
             'status' => 'sometimes|in:planned,confirmed,received,canceled',
         ]);
 
         $validated['status'] = $validated['status'] ?? 'planned';
+        $validated['priority'] = $validated['priority'] ?? 'medium';
 
         $income = Income::create($validated);
         $income->load(['account', 'counterparty', 'item']);
@@ -87,6 +90,10 @@ class IncomeController extends Controller
 
     public function update(Request $request, Income $income)
     {
+        if ($income->status !== 'planned') {
+            return response()->json(['message' => 'Редактирование разрешено только для плановых поступлений'], 403);
+        }
+
         $validated = $request->validate([
             'amount' => 'sometimes|integer|min:1',
             'planned_date' => 'sometimes|date',
@@ -94,6 +101,7 @@ class IncomeController extends Controller
             'counterparty_id' => 'sometimes|exists:counterparties,id',
             'item_id' => 'sometimes|exists:items,id',
             'purpose' => 'sometimes|nullable|string',
+            'priority' => 'sometimes|in:high,medium,low',
         ]);
 
         $income->update($validated);
@@ -104,6 +112,10 @@ class IncomeController extends Controller
 
     public function destroy(Income $income)
     {
+        if ($income->status !== 'planned') {
+            return response()->json(['message' => 'Удаление разрешено только для плановых поступлений'], 403);
+        }
+
         if (auth()->user()->role !== 'admin') {
             return response()->json(['message' => 'Доступ запрещён'], 403);
         }

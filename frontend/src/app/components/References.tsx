@@ -19,34 +19,13 @@ const TABS: { id: TabId; label: string }[] = [
 
 interface Account { id: number; name: string; type: string; currency: string; opening: number; current: number; }
 
-const INITIAL_ACCOUNTS: Account[] = [
-  { id: 1, name: "Расчётный счёт №1", currency: "RUB", opening: 500000, current: 980000 },
-  { id: 2, name: "Расчётный счёт №2", currency: "USD", opening: 22000,  current: 4500   },
-  { id: 3, name: "Касса",             currency: "RUB", opening: 50000,  current: 12500  },
-];
+function mapItemType(type: string): string {
+  return type === "income" ? "Доход" : type === "payment" ? "Расход" : type;
+}
 
-const COUNTERPARTIES = [
-  { id: 1, name: "ООО Поставщик Альфа", inn: "7701234567",   type: "Юр. лицо", contact: "Смирнов А.П."  },
-  { id: 2, name: "ИП Смирнов А.В.",     inn: "772345678901", type: "ИП",        contact: "Смирнов А.В."  },
-  { id: 3, name: "АО ТехСервис",        inn: "7803456789",   type: "Юр. лицо", contact: "Козлова Е.А."  },
-  { id: 4, name: "ООО РентаГрупп",      inn: "7904567890",   type: "Юр. лицо", contact: "Петров И.С."   },
-  { id: 5, name: "ПАО Энергоресурс",    inn: "7705678901",   type: "Юр. лицо", contact: "Васильев К.Д." },
-];
-
-const ARTICLES = [
-  { id: 1, code: "01.01", name: "Аренда офиса",       type: "Расход", group: "Административные"     },
-  { id: 2, code: "01.02", name: "Заработная плата",    type: "Расход", group: "Оплата труда"          },
-  { id: 3, code: "01.03", name: "Расходные материалы", type: "Расход", group: "Административные"     },
-  { id: 4, code: "01.04", name: "Услуги подрядчиков",  type: "Расход", group: "Операционные"         },
-  { id: 5, code: "02.01", name: "Выручка от клиентов", type: "Доход",  group: "Основная деятельность"},
-];
-
-const USERS = [
-  { id: 1, name: "Иванова Мария С.",  login: "m.ivanova",  role: "Инициатор",   status: "active"   },
-  { id: 2, name: "Козлова Елена В.",  login: "e.kozlova",  role: "Согласующий", status: "active"   },
-  { id: 3, name: "Петров Иван А.",    login: "i.petrov",   role: "Казначей",    status: "active"   },
-  { id: 4, name: "Сидоров Андрей К.", login: "a.sidorov",  role: "Наблюдатель", status: "inactive" },
-];
+function mapCpType(type: string): string {
+  return type === "entity" ? "Юр. лицо" : type === "individual" ? "ИП" : type;
+}
 
 function currencySymbol(c: string): string {
   return c === "USD" ? "$" : c === "EUR" ? "€" : "₽";
@@ -133,8 +112,8 @@ function AccountsTab({ canManage = true }: { canManage?: boolean }) {
     const payload = { name: data.name, type: data.type, currency: data.currency, opening: Math.round(data.opening * 100) };
     try {
       if (editTarget) {
-        await api.accounts.update(editTarget.id, payload);
-        setAccounts(prev => prev.map(a => a.id === editTarget.id ? { ...a, ...payload } : a));
+        const updated = await api.accounts.update(editTarget.id, payload) as any;
+        setAccounts(prev => prev.map(a => a.id === editTarget.id ? { ...a, ...updated } : a));
         showToast("Счёт успешно обновлён", "success");
       } else {
         const created = await api.accounts.create(payload) as any;
@@ -192,9 +171,6 @@ function AccountsTab({ canManage = true }: { canManage?: boolean }) {
               <Td>
                 {canManage ? (
                   <div style={{ display: "flex", gap: 6 }}>
-                    <IconBtn title="Редактировать" hoverColor={C.sage} onClick={() => openEdit(row)}>
-                      <Pencil size={14} />
-                    </IconBtn>
                     <IconBtn title="Удалить" hoverColor={C.danger} onClick={() => openDel(row)}>
                       <Trash2 size={14} />
                     </IconBtn>
@@ -241,8 +217,33 @@ function AccountModal({ initial, onSave, onClose }: AccountModalProps) {
   const [name,     setName]     = useState(initial?.name     ?? "");
   const [type,     setType]     = useState(initial?.type     ?? "bank");
   const [currency, setCurrency] = useState(initial?.currency ?? "RUB");
-  const [opening,  setOpening]  = useState(initial ? String(initial.opening) : "");
+  const [opening,  setOpening]  = useState(initial ? String(initial.opening / 100) : "");
   const [focused,  setFocused]  = useState<string | null>(null);
+  const [initCurrency] = useState(initial?.currency ?? "RUB");
+  const [rates, setRates] = useState<Record<string, number> | null>(null);
+
+  useEffect(() => {
+    api.currencies.getAll().then(data => {
+      const map: Record<string, number> = { RUB: 1 };
+      (data as Currency[]).forEach(c => { map[c.code] = c.rate_to_rub; });
+      setRates(map);
+    }).catch(() => setRates({ RUB: 1 }));
+  }, []);
+
+  const handleCurrencyChange = (newCur: string) => {
+    if (!rates) return; // курсы ещё не загружены
+    if (initial && newCur !== initCurrency && opening && parseFloat(opening.replace(/\s/g, "").replace(",", ".")) > 0) {
+      const oldRate = rates[initCurrency] ?? 1;
+      const newRate = rates[newCur] ?? 1;
+      const currentVal = parseFloat(opening.replace(/\s/g, "").replace(",", "."));
+      const converted = (currentVal * oldRate) / newRate;
+      if (!confirm(`Сменить валюту с ${initCurrency} на ${newCur}?\nНачальный остаток будет конвертирован: ${currentVal.toFixed(2)} ${initCurrency} → ${converted.toFixed(2)} ${newCur}`)) {
+        return;
+      }
+      setOpening(converted.toFixed(2));
+    }
+    setCurrency(newCur);
+  };
 
   const focusStyle = (f: string): CSSProperties =>
     focused === f
@@ -315,12 +316,13 @@ function AccountModal({ initial, onSave, onClose }: AccountModalProps) {
 
           {/* Валюта */}
           <div>
-            <FieldLabel>Валюта</FieldLabel>
+            <FieldLabel>Валюта{rates === null ? " (загрузка курсов…)" : ""}</FieldLabel>
             <div style={{ display: "flex", gap: 8 }}>
               {["RUB", "USD", "EUR", "CNY"].map(cur => (
                 <button
                   key={cur}
-                  onClick={() => setCurrency(cur)}
+                  onClick={() => rates && handleCurrencyChange(cur)}
+                  disabled={!rates}
                   style={{
                     flex: 1,
                     padding: "9px 0",
@@ -330,9 +332,10 @@ function AccountModal({ initial, onSave, onClose }: AccountModalProps) {
                     color: currency === cur ? C.sage : C.textLt,
                     fontSize: 13,
                     fontWeight: currency === cur ? 600 : 400,
-                    cursor: "pointer",
+                    cursor: rates ? "pointer" : "wait",
                     fontFamily: "Inter, sans-serif",
                     transition: "all 0.15s",
+                    opacity: rates ? 1 : 0.5,
                   }}
                 >
                   {cur}
@@ -414,7 +417,7 @@ function CounterpartiesTab({ canManage = true }: { canManage?: boolean }) {
 
   useEffect(() => {
     api.counterparties.getAll()
-      .then(data => setRows(data as Counterparty[]))
+      .then(data => setRows((data as Counterparty[]).map(c => ({ ...c, type: mapCpType(c.type) }))))
       .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
@@ -548,7 +551,7 @@ function ArticlesTab({ canManage = true }: { canManage?: boolean }) {
 
   useEffect(() => {
     api.items.getAll()
-      .then(data => setRows(data as Article[]))
+      .then(data => setRows((data as Article[]).map(a => ({ ...a, type: mapItemType(a.type) }))))
       .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
@@ -687,16 +690,13 @@ function UsersTab({ canManage = true }: { canManage?: boolean }) {
         </button>}
       </TableToolbar>
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-        <thead><tr style={{ background: C.hdr }}>{["ФИО","Логин","Роль","Статус","Действия"].map(c => <Th key={c}>{c}</Th>)}</tr></thead>
+        <thead><tr style={{ background: C.hdr }}>{["ФИО","Логин","Роль","Действия"].map(c => <Th key={c}>{c}</Th>)}</tr></thead>
         <tbody>
           {rows.map((row, i) => (
             <Tr key={row.id} i={i}>
               <Td bold>{row.name}</Td>
               <Td mono color={C.textLt}>{row.login}</Td>
               <Td><span style={{ display: "inline-flex", padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 500, background: C.olive20, color: "#555540" }}>{row.role}</span></Td>
-              <Td><button onClick={() => toggleStatus(row.id)} title="Переключить статус" style={{ background: "none", border: "none", cursor: "pointer", padding: 0 }}>
-                {row.status === "active" ? <ActiveBadge /> : <InactiveBadge />}
-              </button></Td>
               <Td><div style={{ display: "flex", gap: 6 }}>
                 {canManage ? <>
                   <IconBtn title="Редактировать" hoverColor={C.sage} onClick={() => setEditing(row)}><Pencil size={14} /></IconBtn>
@@ -741,11 +741,6 @@ function UserModal({ initial, onSave, onClose }: { initial: AppUser | null; onSa
               <button key={r} onClick={() => setRole(r)} style={{ padding: "7px 12px", borderRadius: 6, border: role === r ? `2px solid ${C.sage}` : `1px solid ${C.warm}`, background: role === r ? C.sage10 : C.surface, color: role === r ? C.sage : C.textLt, fontSize: 12, fontWeight: role === r ? 600 : 400, cursor: "pointer", fontFamily: "Inter, sans-serif" }}>{r}</button>
             ))}</div>
           </div>
-          <div><FieldLabel>Статус</FieldLabel>
-            <div style={{ display: "flex", gap: 8 }}>{[["active","Активен"],["inactive","Неактивен"]].map(([v,l]) => (
-              <button key={v} onClick={() => setStatus(v)} style={{ flex: 1, padding: "8px 0", borderRadius: 6, border: status === v ? `2px solid ${v === "active" ? C.sage : C.warm}` : `1px solid ${C.warm}`, background: status === v ? (v === "active" ? C.sage10 : C.ivory) : C.surface, color: status === v ? (v === "active" ? C.sage : C.textLt) : C.textLt, fontSize: 13, fontWeight: status === v ? 600 : 400, cursor: "pointer", fontFamily: "Inter, sans-serif" }}>{l}</button>
-            ))}</div>
-          </div>
         </div>
         <div style={{ borderTop: `1px solid ${C.warm}`, padding: "14px 24px", display: "flex", gap: 10 }}>
           <button onClick={() => {
@@ -755,7 +750,7 @@ function UserModal({ initial, onSave, onClose }: { initial: AppUser | null; onSa
             if (!initial && !password.trim()) errs.push("Пароль обязателен");
             if (password && password.length < 6) errs.push("Пароль минимум 6 символов");
             if (errs.length) { alert(errs.join("\n")); return; }
-            onSave({ id: initial?.id ?? -1, name: name.trim(), login: login.trim(), role, status, password: password || undefined });
+            onSave({ id: initial?.id ?? -1, name: name.trim(), login: login.trim(), role, status: "active", password: password || undefined });
           }} style={{ padding: "9px 20px", borderRadius: 6, background: C.sage, color: C.surface, border: "none", fontSize: 14, fontWeight: 500, cursor: "pointer", fontFamily: "Inter, sans-serif" }}>Сохранить</button>
           <button onClick={onClose} style={{ padding: "9px 12px", borderRadius: 6, background: "transparent", color: C.olive, border: "none", fontSize: 14, cursor: "pointer", fontFamily: "Inter, sans-serif", marginLeft: "auto" }}>Отмена</button>
         </div>
@@ -785,21 +780,34 @@ function CurrenciesTab({ canManage = true }: { canManage?: boolean }) {
     const n = parseFloat(rateInput.replace(",", "."));
     if (isNaN(n) || n <= 0) { showToast("Введите корректный курс", "error"); return; }
     await api.currencies.updateRate(code, n);
-    setCurrencies(cs => cs.map(c => c.code === code ? { ...c, rate_to_rub: n, updated_at: "02.07.2026" } : c));
+    setCurrencies(cs => cs.map(c => c.code === code ? { ...c, rate_to_rub: n, updated_at: new Date().toLocaleDateString("ru-RU") + " " + new Date().toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" }) } : c));
     setEditCode(null);
     showToast(`Курс ${code} обновлён`, "success");
+  };
+
+  const handleRefreshFromCBR = async () => {
+    setLoading(true);
+    try {
+      const result = await api.currencies.refresh();
+      const data = await api.currencies.getAll();
+      setCurrencies(data as Currency[]);
+      showToast(result.message ?? "Курсы обновлены с ЦБ РФ", "success");
+    } catch {
+      showToast("Ошибка обновления курсов с ЦБ РФ", "error");
+    }
+    setLoading(false);
   };
 
   return (
     <>
       <div style={{ padding: "12px 16px", borderBottom: `1px solid ${C.warm}`, display: "flex", alignItems: "center", gap: 12 }}>
         <span style={{ fontSize: 13, color: C.textLt }}>
-          Курсы обновляются вручную. При подключении бэкенда — автоматически через ЦБ РФ.
+          Курсы загружаются с сайта ЦБ РФ. Автообновление ежедневно.
         </span>
-        <button onClick={() => { setLoading(true); api.currencies.getAll().then(d => { setCurrencies(d as Currency[]); setLoading(false); showToast("Курсы обновлены", "success"); }); }}
-          style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 5, padding: "6px 12px", borderRadius: 6, background: C.ivory, border: `1px solid ${C.warm}`, fontSize: 12, color: C.textLt, cursor: "pointer", fontFamily: "Inter, sans-serif" }}>
+        <button onClick={handleRefreshFromCBR}
+          style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 5, padding: "6px 12px", borderRadius: 6, background: C.sage, color: C.surface, border: "none", fontSize: 12, fontWeight: 500, cursor: "pointer", fontFamily: "Inter, sans-serif" }}>
           <RefreshCw size={12} />
-          Обновить
+          Обновить с ЦБ РФ
         </button>
       </div>
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
@@ -846,13 +854,7 @@ function CurrenciesTab({ canManage = true }: { canManage?: boolean }) {
               </Td>
               <Td color={C.textLt}>{cur.updated_at}</Td>
               <Td>
-                {canManage && cur.code !== "RUB" ? (
-                  <IconBtn title="Изменить курс" hoverColor={C.sage} onClick={() => openEdit(cur)}>
-                    <Pencil size={14} />
-                  </IconBtn>
-                ) : (
-                  <span style={{ fontSize: 12, color: C.textLt }}>—</span>
-                )}
+                <span style={{ fontSize: 12, color: C.textLt }}>—</span>
               </Td>
             </Tr>
           ))}
