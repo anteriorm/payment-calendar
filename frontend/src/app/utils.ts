@@ -11,7 +11,8 @@ export const CURRENCY_SYMBOLS: Record<string, string> = {
   RUB: "₽", // ₽
   USD: "$",
   EUR: "€", // €
-  CNY: "¥", // ¥
+  CNY: "¥",
+  AMD: "֏",
 };
 
 export const ACCOUNT_CURRENCY: Record<string, string> = {

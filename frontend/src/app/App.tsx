@@ -131,6 +131,7 @@ function AppShell() {
             <PaymentRequests
               onCreateRequest={perms.canCreateRequest ? () => setShowModal(true) : undefined}
               refreshKey={requestsRefreshKey}
+              canApprove={perms.canApprove}
               onOpenDetails={(paymentId) => {
                 setDrawerPaymentId(paymentId);
                 setDrawerCell(null);

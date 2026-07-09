@@ -6,10 +6,10 @@
 
 import client from "../client";
 import { delay, randomId } from "../mocks/handlers";
-import { mockCounterparties, type Counterparty } from "../mocks/data/counterparties";
+import { type Counterparty } from "../mocks/data/counterparties";
 import { USE_MOCK } from "../../config";
 
-let store: Counterparty[] = [...mockCounterparties];
+let store: Counterparty[] = [];
 
 const real = {
   getAll:  ()                                      => client.get<Counterparty[]>("/counterparties").then(r => r.data),

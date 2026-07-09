@@ -94,6 +94,18 @@ class CounterpartySeeder extends Seeder
                 'created_at' => now(),
                 'updated_at' => now(),
             ],
+            [
+                'name' => 'Самозанятый Орлов И.К.',
+                'inn' => '772456789012',
+                'kpp' => null,
+                'bank_account' => '40802810400000000008',
+                'bank_name' => 'ПАО Сбербанк',
+                'bik' => '044525225',
+                'type' => 'self_employed',
+                'contact' => 'Орлов И.К.',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
         ]);
     }
 }

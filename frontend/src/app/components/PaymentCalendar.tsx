@@ -172,11 +172,12 @@ export function PaymentCalendar({ onCreateRequest, onSelectRequest, onGoToRegist
       .catch(() => {});
   }, []);
 
-  const fetchData = (start: string, end: string, itemId?: string, cpId?: string) => {
+  const fetchData = (start: string, end: string, itemId?: string, cpId?: string, incStatus?: string) => {
     setLoading(true);
     const params: any = { start_date: start, end_date: end };
     if (itemId) params.item_id = itemId;
     if (cpId) params.counterparty_id = cpId;
+    if (incStatus) params.income_status = incStatus;
     api.calendar.get(params)
       .then(data => {
         const map = new Map<string, CalendarDay>();
@@ -314,6 +315,7 @@ export function PaymentCalendar({ onCreateRequest, onSelectRequest, onGoToRegist
   const [customFrom,   setCustomFrom]   = useState(formatDateRu(new Date()));
   const [customTo,     setCustomTo]     = useState(formatDateRu(new Date(Date.now() + 6 * 86400000)));
   const [statusFilter,       setStatusFilter]       = useState("");
+  const [incomeStatusFilter, setIncomeStatusFilter] = useState("");
   const [articleFilter,      setArticleFilter]      = useState("");
   const [counterpartyFilter, setCounterpartyFilter] = useState("");
   /** Фильтр счёта для Month/Quarter grid — "total" = все счета */
@@ -338,8 +340,8 @@ export function PaymentCalendar({ onCreateRequest, onSelectRequest, onGoToRegist
     else if (period === "month") { const d = new Date(anchorISO + "T12:00:00"); start = toISO(new Date(d.getFullYear(), d.getMonth(), 1)); end = toISO(new Date(d.getFullYear(), d.getMonth() + 1, 0)); }
     else if (period === "quarter") { const d = new Date(anchorISO + "T12:00:00"); const qm = Math.floor(d.getMonth() / 3) * 3; start = toISO(new Date(d.getFullYear(), qm, 1)); end = toISO(new Date(d.getFullYear(), qm + 3, 0)); }
     else { start = fromRu ? toISO(fromRu) : anchorISO; end = toRu ? toISO(toRu) : addDays(anchorISO, 6); }
-    fetchData(start, end, articleFilter || undefined, counterpartyFilter || undefined);
-  }, [period, dayOffset, customFrom, customTo, articleFilter, counterpartyFilter, refreshKey]);
+    fetchData(start, end, articleFilter || undefined, counterpartyFilter || undefined, incomeStatusFilter || undefined);
+  }, [period, dayOffset, customFrom, customTo, articleFilter, counterpartyFilter, incomeStatusFilter, refreshKey]);
 
   /* ── Derived display state ── */
   const anchor        = offsetToDate(dayOffset);
@@ -640,6 +642,42 @@ export function PaymentCalendar({ onCreateRequest, onSelectRequest, onGoToRegist
           )}
         </div>
 
+        {/* Income status filter */}
+        <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+          <span style={{ fontSize:12, color:C.textLt, whiteSpace:"nowrap" }}>Поступление:</span>
+          <div style={{ position:"relative" }}>
+            <select
+              value={incomeStatusFilter}
+              onChange={e => setIncomeStatusFilter(e.target.value)}
+              style={{
+                padding:"5px 28px 5px 10px",
+                border: incomeStatusFilter ? `1.5px solid ${C.sage}` : `1px solid ${C.warm}`,
+                borderRadius:6,
+                background: incomeStatusFilter ? C.sage10 : C.surface,
+                color: incomeStatusFilter ? C.sage : C.textLt,
+                fontSize:12,
+                fontWeight: incomeStatusFilter ? 600 : 400,
+                cursor:"pointer",
+                fontFamily:"Inter, sans-serif",
+                outline:"none",
+                appearance:"none",
+              }}
+            >
+              <option value="">Все</option>
+              <option value="planned">Плановое</option>
+              <option value="confirmed">Подтверждено</option>
+              <option value="received">Получено</option>
+            </select>
+            <div style={{ position:"absolute", right:7, top:"50%", transform:"translateY(-50%)", pointerEvents:"none", color: incomeStatusFilter ? C.sage : C.textLt, display:"flex" }}>
+              <ChevronRight size={11} style={{ transform:"rotate(90deg)" }} />
+            </div>
+          </div>
+          {incomeStatusFilter && (
+            <button onClick={() => setIncomeStatusFilter("")} title="Сбросить"
+              style={{ background:"none", border:"none", cursor:"pointer", color:C.textLt, padding:"2px 4px", fontSize:14, lineHeight:1, borderRadius:4 }}>×</button>
+          )}
+        </div>
+
         {/* Article filter */}
         <div style={{ display:"flex", alignItems:"center", gap:6 }}>
           <span style={{ fontSize:12, color:C.textLt, whiteSpace:"nowrap" }}>Статья:</span>
@@ -730,13 +768,17 @@ export function PaymentCalendar({ onCreateRequest, onSelectRequest, onGoToRegist
       </div>
 
       {/* ── Active filters banner — показывается при любом активном фильтре ── */}
-      {(statusFilter || articleFilter || counterpartyFilter) && (() => {
+      {(statusFilter || incomeStatusFilter || articleFilter || counterpartyFilter) && (() => {
         const STATUS_LABELS: Record<string, string> = {
           draft: "Черновик", pending: "На согласовании", approved: "Согласована",
           inRegistry: "В реестре", paid: "Оплачена",
         };
+        const INC_STATUS_LABELS: Record<string, string> = {
+          planned: "Плановое", confirmed: "Подтверждено", received: "Получено",
+        };
         const chips: string[] = [];
         if (statusFilter)       chips.push(`статус: «${STATUS_LABELS[statusFilter] ?? statusFilter}»`);
+        if (incomeStatusFilter) chips.push(`поступление: «${INC_STATUS_LABELS[incomeStatusFilter] ?? incomeStatusFilter}»`);
         if (articleFilter)      chips.push(`статья: «${articleFilter}»`);
         if (counterpartyFilter) chips.push(`контрагент: «${counterpartyFilter}»`);
         return (
@@ -749,11 +791,8 @@ export function PaymentCalendar({ onCreateRequest, onSelectRequest, onGoToRegist
                 {chip}
               </span>
             ))}
-            <span style={{ fontSize: 11, color: C.textLt }}>
-              — при подключении бэкенда суммы будут пересчитаны
-            </span>
             <button
-              onClick={() => { setStatusFilter(""); setArticleFilter(""); setCounterpartyFilter(""); }}
+              onClick={() => { setStatusFilter(""); setIncomeStatusFilter(""); setArticleFilter(""); setCounterpartyFilter(""); }}
               style={{ marginLeft: "auto", background: "none", border: `1px solid ${C.sage}`, borderRadius: 4, padding: "2px 10px", fontSize: 11, color: C.sage, cursor: "pointer", fontFamily: "Inter, sans-serif" }}>
               Сбросить все
             </button>

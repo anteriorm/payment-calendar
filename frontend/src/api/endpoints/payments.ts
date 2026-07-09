@@ -2,7 +2,7 @@ import client from "../client";
 import { delay, randomId } from "../mocks/handlers";
 import { mockPayments, type Payment, type PaymentStatus } from "../mocks/data/payments";
 import { mockAccounts } from "../mocks/data/accounts";
-import { mockCounterparties } from "../mocks/data/counterparties";
+
 import { mockItems } from "../mocks/data/items";
 import { USE_MOCK } from "../../config";
 

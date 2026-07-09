@@ -1,1 +1,29 @@
-удалить все данные, удалить кнопку редактирования в счетах и кассах, статус у пользователей удалить, удалить редактирование у курса валюты и так же во вкладке справочники  обновление через цб не работает
+payment_backend   |   2026_07_07_130000_add_priority_to_incomes_table ................ 6.54ms DONE
+payment_postgres  | 2026-07-09 02:31:31.772 UTC [36] ERROR:  type "counterparties_type_enum" does not exist
+payment_postgres  | 2026-07-09 02:31:31.772 UTC [36] STATEMENT:  ALTER TYPE counterparties_type_enum ADD VALUE IF NOT EXISTS 'self_employed'
+payment_backend   |   2026_07_09_100000_add_self_employed_to_counterparties_type .... 47.42ms FAIL
+payment_backend   | 
+payment_backend   |    Illuminate\Database\QueryException 
+payment_backend   | 
+payment_backend   |   SQLSTATE[42704]: Undefined object: 7 ERROR:  type "counterparties_type_enum" does not exist (Connection: pgsql, Host: postgres, Port: 5432, Database: payment_calendar, SQL: ALTER TYPE counterparties_type_enum ADD VALUE IF NOT EXISTS 'self_employed')
+payment_backend   | 
+payment_backend   |   at vendor/laravel/framework/src/Illuminate/Database/Connection.php:857
+payment_backend   |     853▕             $exceptionType = ($isUniqueConstraintError = $this->isUniqueConstraintError($e))
+payment_backend   |     854▕                 ? UniqueConstraintViolationException::class
+payment_backend   |     855▕                 : QueryException::class;payment_backend   |     856▕ 
+payment_backend   |   ➜ 857▕             $exception = new $exceptionType(
+payment_backend   |     858▕                 $this->getNameWithReadWriteType(),
+payment_backend   |     859▕                 $query,
+payment_backend   |     860▕                 $this->prepareBindings($bindings),
+payment_backend   |     861▕                 $e,
+payment_backend   | 
+payment_backend   |       +7 vendor frames 
+payment_backend   | 
+payment_backend   |   8   database/migrations/2026_07_09_100000_add_self_employed_to_counterparties_type.php:10
+payment_backend   |       Illuminate\Support\Facades\Facade::__callStatic("statement")
+payment_backend   |       +38 vendor frames 
+payment_backend   | 
+payment_backend   |   47  artisan:16
+payment_backend   |       Illuminate\Foundation\Application::handleCommand(Object(Symfony\Component\Console\Input\ArgvInput))
+payment_backend   | 
+payment_backend exited with code 1

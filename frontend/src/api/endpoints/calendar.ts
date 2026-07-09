@@ -15,9 +15,12 @@ import { mockCalendarDays, type CalendarDay } from "../mocks/data/calendar";
 import { USE_MOCK } from "../../config";
 
 export interface CalendarFilter {
-  start_date:  string;  // "YYYY-MM-DD"
-  end_date:    string;
-  account_id?: number;
+  start_date:       string;  // "YYYY-MM-DD"
+  end_date:         string;
+  account_id?:      number;
+  item_id?:         number;
+  counterparty_id?: number;
+  income_status?:   "planned" | "confirmed" | "received";
 }
 
 const real = {

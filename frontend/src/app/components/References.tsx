@@ -17,18 +17,18 @@ const TABS: { id: TabId; label: string }[] = [
   { id: "currencies",     label: "Валюты"           },
 ];
 
-interface Account { id: number; name: string; type: string; currency: string; opening: number; current: number; }
+interface Account { id: number; name: string; type: string; currency: string; opening: number; current: number; created_at?: string; }
 
 function mapItemType(type: string): string {
   return type === "income" ? "Доход" : type === "payment" ? "Расход" : type;
 }
 
 function mapCpType(type: string): string {
-  return type === "entity" ? "Юр. лицо" : type === "individual" ? "ИП" : type;
+  return type === "entity" ? "Юр. лицо" : type === "individual" ? "ИП" : type === "self_employed" ? "Самозанятый" : type;
 }
 
 function currencySymbol(c: string): string {
-  return c === "USD" ? "$" : c === "EUR" ? "€" : "₽";
+  return c === "USD" ? "$" : c === "EUR" ? "€" : c === "AMD" ? "֏" : "₽";
 }
 
 function ruFmt(n: number): string {
@@ -155,7 +155,7 @@ function AccountsTab({ canManage = true }: { canManage?: boolean }) {
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
         <thead>
           <tr style={{ background: C.hdr }}>
-            {["Название", "Валюта", "Нач. остаток", "Тек. остаток", "Статус", "Действия"].map(col => (
+            {["Название", "Валюта", "Нач. остаток", "Тек. остаток", "Дата создания", "Статус", "Действия"].map(col => (
               <Th key={col}>{col}</Th>
             ))}
           </tr>
@@ -167,6 +167,7 @@ function AccountsTab({ canManage = true }: { canManage?: boolean }) {
               <Td>{row.currency}</Td>
               <Td mono>{ruFmt(row.opening / 100)} {currencySymbol(row.currency)}</Td>
               <Td mono color={row.current / 100 < 50000 ? C.danger : C.textDk}>{ruFmt(row.current / 100)} {currencySymbol(row.currency)}</Td>
+              <Td color={C.textLt}>{row.created_at ?? '—'}</Td>
               <Td><ActiveBadge /></Td>
               <Td>
                 {canManage ? (
@@ -318,7 +319,7 @@ function AccountModal({ initial, onSave, onClose }: AccountModalProps) {
           <div>
             <FieldLabel>Валюта{rates === null ? " (загрузка курсов…)" : ""}</FieldLabel>
             <div style={{ display: "flex", gap: 8 }}>
-              {["RUB", "USD", "EUR", "CNY"].map(cur => (
+              {["RUB", "USD", "EUR", "AMD"].map(cur => (
                 <button
                   key={cur}
                   onClick={() => rates && handleCurrencyChange(cur)}
@@ -424,7 +425,7 @@ function CounterpartiesTab({ canManage = true }: { canManage?: boolean }) {
 
   const save = async (r: Counterparty) => {
     // Map frontend fields to backend fields
-    const backendType = r.type === "Юр. лицо" ? "entity" : r.type === "ИП" ? "individual" : "entity";
+    const backendType = r.type === "Юр. лицо" ? "entity" : r.type === "ИП" ? "individual" : r.type === "Самозанятый" ? "self_employed" : "entity";
     const payload = { name: r.name, inn: r.inn, kpp: r.kpp, bank_account: r.account, bank_name: r.bank, bik: r.bik, type: backendType, contact: r.contact };
     try {
       if (r.id < 0) {
@@ -523,7 +524,7 @@ function CpModal({ initial, onSave, onClose }: { initial: Counterparty | null; o
           <div><FieldLabel>Банк</FieldLabel><input value={bank} onChange={e => setBank(e.target.value)} style={inp} placeholder="ПАО Сбербанк" /></div>
           <div><FieldLabel>БИК</FieldLabel><input value={bik} onChange={e => setBik(e.target.value)} style={inp} placeholder="044525225" /></div>
           <div><FieldLabel>Тип</FieldLabel>
-            <div style={{ display: "flex", gap: 8 }}>{["Юр. лицо","ИП","Физ. лицо"].map(t => (
+            <div style={{ display: "flex", gap: 8 }}>{["Юр. лицо","ИП","Физ. лицо","Самозанятый"].map(t => (
               <button key={t} onClick={() => setType(t)} style={{ flex: 1, padding: "8px 0", borderRadius: 6, border: type === t ? `2px solid ${C.sage}` : `1px solid ${C.warm}`, background: type === t ? C.sage10 : C.surface, color: type === t ? C.sage : C.textLt, fontSize: 12, fontWeight: type === t ? 600 : 400, cursor: "pointer", fontFamily: "Inter, sans-serif" }}>{t}</button>
             ))}</div>
           </div>

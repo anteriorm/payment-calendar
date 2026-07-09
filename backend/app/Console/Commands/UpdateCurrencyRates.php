@@ -15,7 +15,7 @@ class UpdateCurrencyRates extends Command
     private const CURRENCIES = [
         'USD' => ['name' => 'Доллар США',      'symbol' => '$', 'cbr_id' => 'R01235'],
         'EUR' => ['name' => 'Евро',             'symbol' => '€', 'cbr_id' => 'R01239'],
-        'CNY' => ['name' => 'Китайский юань',   'symbol' => '¥', 'cbr_id' => 'R01375'],
+        'AMD' => ['name' => 'Армянский драм',     'symbol' => '֏', 'cbr_id' => 'R01060'],
         'GBP' => ['name' => 'Фунт стерлингов',  'symbol' => '£', 'cbr_id' => 'R01035'],
         'JPY' => ['name' => 'Японская иена',     'symbol' => '¥', 'cbr_id' => 'R01820'],
         'KZT' => ['name' => 'Казахстанский тенге','symbol' => '₸', 'cbr_id' => 'R01335'],

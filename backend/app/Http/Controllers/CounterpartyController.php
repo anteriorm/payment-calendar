@@ -39,7 +39,7 @@ class CounterpartyController extends Controller
             'bank_account' => 'nullable|string|max:30',
             'bank_name' => 'nullable|string|max:255',
             'bik' => 'nullable|string|max:20',
-            'type' => 'required|in:entity,individual',
+            'type' => 'required|in:entity,individual,self_employed',
             'contact' => 'nullable|string|max:255',
         ]);
 
@@ -64,7 +64,7 @@ class CounterpartyController extends Controller
             'bank_account' => 'sometimes|nullable|string|max:30',
             'bank_name' => 'sometimes|nullable|string|max:255',
             'bik' => 'sometimes|nullable|string|max:20',
-            'type' => 'sometimes|in:entity,individual',
+            'type' => 'sometimes|in:entity,individual,self_employed',
             'contact' => 'sometimes|nullable|string|max:255',
         ]);
 

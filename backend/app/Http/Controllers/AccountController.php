@@ -36,6 +36,7 @@ class AccountController extends Controller
             'currency' => $account->currency,
             'opening' => $account->initial_balance,
             'current' => $account->initial_balance + $incomeTotal - $paymentTotal,
+            'created_at' => $account->created_at?->format('d.m.Y') ?? '',
         ];
     }
 

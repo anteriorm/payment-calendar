@@ -16,7 +16,7 @@ return new class extends Migration
             $table->string('bank_account')->nullable();
             $table->string('bank_name')->nullable();
             $table->string('bik')->nullable();
-            $table->enum('type', ['entity', 'individual'])->default('entity');
+            $table->enum('type', ['entity', 'individual', 'self_employed'])->default('entity');
             $table->string('contact')->nullable();
             $table->timestamps();
         });

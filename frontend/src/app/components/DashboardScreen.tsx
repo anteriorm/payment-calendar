@@ -44,7 +44,7 @@ function ruFmt2(n: number): string {
 
 function fmtCurMap(m: Record<string, number> | number | undefined): string {
   if (!m || typeof m === "number") return ruFmt2(typeof m === "number" ? m : 0) + " ₽";
-  const sym: Record<string, string> = { RUB: "₽", USD: "$", EUR: "€", CNY: "¥", GBP: "£", JPY: "¥", KZT: "₸", BYN: "Br", TRY: "₺", CHF: "₣" };
+  const sym: Record<string, string> = { RUB: "₽", USD: "$", EUR: "€", AMD: "֏", GBP: "£", JPY: "¥", KZT: "₸", BYN: "Br", TRY: "₺", CHF: "₣" };
   return Object.entries(m)
     .filter(([, v]) => v !== 0)
     .map(([c, v]) => `${ruFmt2(v)} ${sym[c] ?? c}`)
@@ -110,7 +110,7 @@ export function DashboardScreen() {
             />
             <StatCard
               label="Ближайший разрыв"
-              value={s.nearestGapDate ? formatRub(s.nearestGapAmount).replace(" ₽", "") + (s.nearestGapCurrency ? ` ${({RUB:"₽",USD:"$",EUR:"€",CNY:"¥",GBP:"£",JPY:"¥",KZT:"₸",BYN:"Br",TRY:"₺",CHF:"₣"} as Record<string,string>)[s.nearestGapCurrency] ?? s.nearestGapCurrency}` : " ₽") : "Нет"}
+              value={s.nearestGapDate ? formatRub(s.nearestGapAmount).replace(" ₽", "") + (s.nearestGapCurrency ? ` ${({RUB:"₽",USD:"$",EUR:"€",AMD:"֏",GBP:"£",JPY:"¥",KZT:"₸",BYN:"Br",TRY:"₺",CHF:"₣"} as Record<string,string>)[s.nearestGapCurrency] ?? s.nearestGapCurrency}` : " ₽") : "Нет"}
               valueColor={C.danger}
               sub={s.nearestGapDate ?? "Разрывов нет"}
               icon={<AlertTriangle size={18} color={C.danger} />}

@@ -18,6 +18,7 @@ class CalendarController extends Controller
             'account_id' => 'nullable|exists:accounts,id',
             'item_id' => 'nullable|exists:items,id',
             'counterparty_id' => 'nullable|exists:counterparties,id',
+            'income_status' => 'nullable|in:planned,confirmed,received',
         ]);
 
         $start = Carbon::parse($request->start_date)->startOfDay();
@@ -51,8 +52,12 @@ class CalendarController extends Controller
 
         $payments = $regularPayments->merge($recurringPayments);
 
+        $incomeStatuses = $request->filled('income_status')
+            ? [$request->income_status]
+            : ['planned', 'confirmed', 'received'];
+
         $incomeQuery = Income::where('planned_date', '<=', $endStr)
-            ->whereIn('status', ['planned', 'confirmed', 'received']);
+            ->whereIn('status', $incomeStatuses);
 
         if ($request->filled('item_id')) {
             $payments = $payments->filter(fn($p) => $p->item_id == $request->item_id);

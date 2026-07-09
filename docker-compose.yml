@@ -22,6 +22,7 @@ services:
       - DB_PASSWORD=postgres
       - FRONTEND_URL=http://localhost:5173
       - SANCTUM_STATEFUL_DOMAINS=localhost:5173,localhost,127.0.0.1
+      - TZ=Europe/Moscow
     depends_on:
       - postgres
 

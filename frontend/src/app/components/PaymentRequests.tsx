@@ -1,5 +1,5 @@
 import { useState, useEffect, type ChangeEvent, type DragEvent, type ReactNode } from "react";
-import { Search, ChevronDown, Edit2, Send, Trash2, FolderOpen, Upload, X, FileDown, ArrowUpDown, ArrowUp, ArrowDown, RefreshCw, GitBranch } from "lucide-react";
+import { Search, ChevronDown, Edit2, Send, Trash2, FolderOpen, Upload, X, FileDown, ArrowUpDown, ArrowUp, ArrowDown, RefreshCw, GitBranch, CheckCircle, XCircle } from "lucide-react";
 import { TableSkeleton, TableError } from "./TableSkeleton";
 import * as api from "../../api";
 import { C } from "../tokens";
@@ -82,8 +82,9 @@ function toModalData(req: Request): ModalRequestData {
 
 interface PaymentRequestsProps {
   onCreateRequest?: () => void;
-  /** Открыть детали заявки (маршрут согласования) в RequestDrawer */
   onOpenDetails?:   (paymentId: number) => void;
+  refreshKey?:      number;
+  canApprove?:      boolean;
 }
 
 const PAGE_SIZE = 8;
@@ -118,7 +119,7 @@ function mapApiToRequest(
   };
 }
 
-export function PaymentRequests({ onCreateRequest, onOpenDetails, refreshKey = 0 }: PaymentRequestsProps) {
+export function PaymentRequests({ onCreateRequest, onOpenDetails, refreshKey = 0, canApprove = false }: PaymentRequestsProps) {
   const { showToast } = useToast();
 
   const [rows,          setRows]          = useState<Request[]>([]);
@@ -337,6 +338,26 @@ export function PaymentRequests({ onCreateRequest, onOpenDetails, refreshKey = 0
     }
   };
 
+  const handleApprove = async (id: number) => {
+    try {
+      await api.payments.approve(id);
+      showToast("Заявка согласована", "success");
+      loadData();
+    } catch {
+      showToast("Ошибка согласования", "error");
+    }
+  };
+
+  const handleReject = async (id: number) => {
+    try {
+      await api.payments.reject(id, "");
+      showToast("Заявка отклонена", "warning");
+      loadData();
+    } catch {
+      showToast("Ошибка отклонения", "error");
+    }
+  };
+
   const handleExport = () => {
     const toExport = selected.size > 0
       ? filtered.filter(r => selected.has(r.id))
@@ -525,6 +546,16 @@ export function PaymentRequests({ onCreateRequest, onOpenDetails, refreshKey = 0
                       <IconBtn title="Удалить" hoverColor={C.danger} onClick={() => setDeleteRequest(req)}>
                         <Trash2 size={14} />
                       </IconBtn>
+                    )}
+                    {canApprove && req.status === "pending" && (
+                      <>
+                        <IconBtn title="Согласовать" hoverColor={C.sage} onClick={() => handleApprove(req.id)}>
+                          <CheckCircle size={14} />
+                        </IconBtn>
+                        <IconBtn title="Отклонить" hoverColor={C.danger} onClick={() => handleReject(req.id)}>
+                          <XCircle size={14} />
+                        </IconBtn>
+                      </>
                     )}
                   </div>
                 </div>

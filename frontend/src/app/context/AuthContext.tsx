@@ -44,7 +44,7 @@ export interface Permissions {
 
 export const ROLE_PERMS: Record<Role, Permissions> = {
   initiator: { canApprove: false, canReschedule: false, canFormRegistry: false, canMarkPaid: false, canManageRefs: false, canCreateRequest: true,  canCreateIncome: false },
-  treasurer: { canApprove: false, canReschedule: true,  canFormRegistry: true,  canMarkPaid: true,  canManageRefs: false, canCreateRequest: false, canCreateIncome: true  },
+  treasurer: { canApprove: true,  canReschedule: true,  canFormRegistry: true,  canMarkPaid: true,  canManageRefs: false, canCreateRequest: false, canCreateIncome: true  },
   manager:   { canApprove: true,  canReschedule: false, canFormRegistry: false, canMarkPaid: false, canManageRefs: false, canCreateRequest: false, canCreateIncome: false },
   admin:     { canApprove: true,  canReschedule: true,  canFormRegistry: true,  canMarkPaid: true,  canManageRefs: true,  canCreateRequest: true,  canCreateIncome: true  },
 };

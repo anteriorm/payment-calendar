@@ -175,7 +175,7 @@ class PaymentController extends Controller
 
         AuditService::log('payment_submitted', "Заявка №{$payment->id}", 'Отправлена на согласование');
 
-        return response()->json(['message' => 'Заявка отправлена на согласование', 'payment' => $this->formatPayment($payment)]);
+        return response()->json($this->formatPayment($payment));
     }
 
     public function approve(Request $request, Payment $payment)
@@ -184,7 +184,7 @@ class PaymentController extends Controller
             return response()->json(['message' => 'Только заявка в статусе "на согласовании" может быть утверждена'], 403);
         }
 
-        if (!in_array(Auth::user()->role, ['manager', 'admin'])) {
+        if (!in_array(Auth::user()->role, ['manager', 'treasurer', 'admin'])) {
             return response()->json(['message' => 'У вас нет прав утверждать'], 403);
         }
 
@@ -202,7 +202,7 @@ class PaymentController extends Controller
 
         AuditService::log('payment_approved', "Заявка №{$payment->id}", $request->comment);
 
-        return response()->json(['message' => 'Заявка утверждена', 'payment' => $this->formatPayment($payment)]);
+        return response()->json($this->formatPayment($payment));
     }
 
     public function reject(Request $request, Payment $payment)
@@ -211,7 +211,7 @@ class PaymentController extends Controller
             return response()->json(['message' => 'Только заявка в статусе "на согласовании" может быть отклонена'], 403);
         }
 
-        if (!in_array(Auth::user()->role, ['manager', 'admin'])) {
+        if (!in_array(Auth::user()->role, ['manager', 'treasurer', 'admin'])) {
             return response()->json(['message' => 'У вас нет прав отклонять'], 403);
         }
 
@@ -229,7 +229,7 @@ class PaymentController extends Controller
 
         AuditService::log('payment_rejected', "Заявка №{$payment->id}", $request->comment);
 
-        return response()->json(['message' => 'Заявка отклонена', 'payment' => $this->formatPayment($payment)]);
+        return response()->json($this->formatPayment($payment));
     }
 
     // -------- Перенос --------
@@ -251,6 +251,6 @@ class PaymentController extends Controller
 
         AuditService::log('payment_moved', "Заявка №{$payment->id}", "{$oldDate} → {$request->planned_date}");
 
-        return response()->json(['message' => 'Дата платежа изменена', 'payment' => $this->formatPayment($payment)]);
+        return response()->json($this->formatPayment($payment));
     }
 }
