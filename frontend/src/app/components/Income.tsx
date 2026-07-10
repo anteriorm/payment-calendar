@@ -2,7 +2,7 @@ import { useState, useEffect, type CSSProperties, type ReactNode } from "react";
 import { TableSkeleton, TableError } from "./TableSkeleton";
 import { ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
 import * as api from "../../api";
-import { Search, ChevronDown, Edit2, Trash2, FolderOpen, X, BarChart2, CheckCircle, ThumbsUp } from "lucide-react";
+import { Search, ChevronDown, Edit2, Trash2, FolderOpen, X, BarChart2, CheckCircle, ThumbsUp, FileDown } from "lucide-react";
 import { C } from "../tokens";
 import { useToast } from "./Toast";
 import { exportCsv, kopecksToRub, rubToKopecks, formatRubFromRub, getAccountCurrency, formatAmount, registerAccountCurrency } from "../utils";
@@ -100,7 +100,6 @@ export function Income({ onCreateIncome, canCreate = true, onCreated }: IncomePr
   const [editTarget, setEditTarget] = useState<IncomeRow | null>(null);
   const [delTarget,  setDelTarget]  = useState<IncomeRow | null>(null);
   const [showCreate, setShowCreate] = useState(false);
-  const [showImport, setShowImport] = useState(false);
 
   // ----- Загрузка справочников -----
   const [accounts, setAccounts] = useState<any[]>([]);
@@ -186,6 +185,24 @@ export function Income({ onCreateIncome, canCreate = true, onCreated }: IncomePr
     );
     showToast(`Поступления.csv скачан (${toExport.length} строк)`, "success");
     setSelected(new Set());
+  };
+
+  const handleExportAll = () => {
+    exportCsv(
+      "Поступления.csv",
+      ["№", "Контрагент", "Статья", "Назначение", "Сумма", "Дата", "Счёт", "Статус"],
+      rows.map(r => [
+        r.id,
+        r.counterparty,
+        r.article,
+        r.purpose,
+        formatRubFromRub(r.amount),
+        r.date,
+        r.account,
+        STATUS_CFG[r.status].label,
+      ]),
+    );
+    showToast(`Поступления.csv скачан (${rows.length} строк)`, "success");
   };
 
   const normalizeAcc = (s: string) => s.replace(/\s*счёт\s*/i, " ").replace(/\s+/g, " ").trim();
@@ -279,9 +296,9 @@ export function Income({ onCreateIncome, canCreate = true, onCreated }: IncomePr
             Создать поступление
           </button>
         )}
-        <button onClick={() => setShowImport(true)} style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 14px", borderRadius: 6, background: "transparent", color: C.olive, border: `1.5px solid ${C.olive}`, fontSize: 13, fontWeight: 500, cursor: "pointer", fontFamily: "Inter, sans-serif", flexShrink: 0 }}>
-          <FolderOpen size={14} />
-          Импорт из Excel
+        <button onClick={handleExportAll} style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 14px", borderRadius: 6, background: "transparent", color: C.olive, border: `1.5px solid ${C.olive}`, fontSize: 13, fontWeight: 500, cursor: "pointer", fontFamily: "Inter, sans-serif", flexShrink: 0 }}>
+          <FileDown size={14} />
+          Экспорт в CSV
         </button>
       </div>
 
@@ -487,13 +504,7 @@ export function Income({ onCreateIncome, canCreate = true, onCreated }: IncomePr
         <IncomeConfirmDelete row={delTarget} onConfirm={handleDelete} onCancel={() => setDelTarget(null)} />
       )}
 
-      {/* ── Import modal ── */}
-      {showImport && (
-        <IncomeImportModal
-          onClose={() => setShowImport(false)}
-          onImported={() => { setShowImport(false); loadData(); showToast("Импорт завершён", "success"); }}
-        />
-      )}
+
     </div>
   );
 }
@@ -693,56 +704,4 @@ function SumCard({ label, value, color, bold }: { label: string; value: string; 
   );
 }
 
-/* ── Import Modal ───────────────────────────────────── */
-function IncomeImportModal({ onClose, onImported }: { onClose: () => void; onImported: () => void }) {
-  const { showToast } = useToast();
-  const [file, setFile] = useState<File | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [errors, setErrors] = useState<string[]>([]);
 
-  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0];
-    if (f) { setFile(f); setErrors([]); }
-  };
-
-  const handleImport = async () => {
-    if (!file) return;
-    setLoading(true);
-    try {
-      const result = await api.incomes.import(file);
-      if (result.errors?.length) setErrors(result.errors);
-      else onImported();
-      showToast(result.message ?? "Импорт завершён", "success");
-    } catch {
-      showToast("Ошибка импорта", "error");
-    }
-    setLoading(false);
-  };
-
-  return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: C.overlay, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1100, fontFamily: "Inter, sans-serif" }}>
-      <div onClick={e => e.stopPropagation()} style={{ width: 480, background: C.surface, border: `1px solid ${C.warm}`, borderRadius: 12, overflow: "hidden", boxShadow: "0 4px 24px rgba(44,44,30,0.18)" }}>
-        <div style={{ padding: "18px 24px 14px", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: `1px solid ${C.warm}` }}>
-          <h2 style={{ fontSize: 16, fontWeight: 600, color: C.textDk, margin: 0 }}>Импорт поступлений из CSV</h2>
-          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: C.textLt, display: "flex" }}><X size={17} /></button>
-        </div>
-        <div style={{ padding: "18px 24px" }}>
-          <p style={{ fontSize: 12, color: C.textLt, marginBottom: 12 }}>Формат: дата;счёт;контрагент;статья;сумма;назначение (разделитель — точка с запятой)</p>
-          <input type="file" accept=".csv,.txt" onChange={handleFile} style={{ fontSize: 13, color: C.textDk }} />
-          {file && <p style={{ fontSize: 12, color: C.sage, marginTop: 8 }}>Выбран: {file.name}</p>}
-          {errors.length > 0 && (
-            <div style={{ marginTop: 12, padding: 10, background: C.danger12, borderRadius: 6, maxHeight: 120, overflow: "auto" }}>
-              {errors.map((e, i) => <p key={i} style={{ fontSize: 11, color: C.danger, margin: "2px 0" }}>{e}</p>)}
-            </div>
-          )}
-        </div>
-        <div style={{ padding: "14px 24px", display: "flex", gap: 10, borderTop: `1px solid ${C.warm}` }}>
-          <button onClick={handleImport} disabled={!file || loading} style={{ padding: "9px 20px", borderRadius: 6, background: file ? C.sage : C.warm, color: C.surface, border: "none", fontSize: 14, fontWeight: 500, cursor: file ? "pointer" : "not-allowed", fontFamily: "Inter, sans-serif" }}>
-            {loading ? "Импорт…" : "Импортировать"}
-          </button>
-          <button onClick={onClose} style={{ padding: "9px 12px", borderRadius: 6, background: "transparent", color: C.olive, border: "none", fontSize: 14, cursor: "pointer", fontFamily: "Inter, sans-serif", marginLeft: "auto" }}>Отмена</button>
-        </div>
-      </div>
-    </div>
-  );
-}

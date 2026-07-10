@@ -141,7 +141,7 @@ export function PaymentRequests({ onCreateRequest, onOpenDetails, refreshKey = 0
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [editRequest,     setEditRequest]     = useState<Request | null>(null);
   const [deleteRequest,   setDeleteRequest]   = useState<Request | null>(null);
-  const [showImport,      setShowImport]      = useState(false);
+
 
   // ── Загрузка справочников ──
   const [accounts, setAccounts]               = useState<any[]>([]);
@@ -426,11 +426,7 @@ export function PaymentRequests({ onCreateRequest, onOpenDetails, refreshKey = 0
             <FileDown size={14} />
             Выгрузить в CSV
           </button>
-          <button onClick={() => setShowImport(true)}
-            style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 14px", borderRadius: 6, background: "transparent", color: C.olive, border: `1.5px solid ${C.olive}`, fontSize: 13, fontWeight: 500, cursor: "pointer", fontFamily: "Inter, sans-serif", flexShrink: 0 }}>
-            <FolderOpen size={14} />
-            Импорт из Excel
-          </button>
+
         </div>
 
         {/* ── Table ── */}
@@ -648,17 +644,7 @@ export function PaymentRequests({ onCreateRequest, onOpenDetails, refreshKey = 0
         />
       )}
 
-      {/* ── Import modal ── */}
-      {showImport && (
-        <ImportModal
-          onClose={() => setShowImport(false)}
-          onImport={imported => {
-            setRows(prev => [...imported, ...prev]);
-            showToast(`Импортировано ${imported.length} заявок`, "success");
-            setShowImport(false);
-          }}
-        />
-      )}
+
 
       {/* ── Route picker modal (shown when clicking Send) ── */}
       {sendPickerId !== null && (
@@ -808,205 +794,6 @@ function DeleteConfirmDialog({ id, onConfirm, onCancel }: {
             style={{ padding: "9px 16px", borderRadius: 6, background: "transparent", color: C.olive, border: `1.5px solid ${C.warm}`, fontSize: 14, cursor: "pointer", fontFamily: "Inter, sans-serif" }}>
             Отмена
           </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ── CSV parser helpers ─────────────────────────────── */
-function splitCsvLine(line: string, sep: string): string[] {
-  const result: string[] = [];
-  let cur = "";
-  let inQ = false;
-  for (let i = 0; i < line.length; i++) {
-    const c = line[i];
-    if (c === '"') {
-      if (inQ && line[i + 1] === '"') { cur += '"'; i++; }
-      else inQ = !inQ;
-    } else if (c === sep && !inQ) { result.push(cur); cur = ""; }
-    else cur += c;
-  }
-  result.push(cur);
-  return result;
-}
-
-function parseCsvToRequests(text: string, idOffset: number): Request[] {
-  const cleaned = text.replace(/^﻿/, "");
-  const sep     = cleaned.split("\n")[0].includes(";") ? ";" : ",";
-  const lines   = cleaned.split(/\r?\n/).filter(l => l.trim());
-  if (lines.length < 2) return [];
-
-  const headers = splitCsvLine(lines[0], sep).map(h => h.replace(/"/g, "").trim());
-  const idx     = (name: string) => headers.findIndex(h => h === name);
-
-  const iCp  = idx("Контрагент");
-  const iArt = idx("Статья");
-  const iPur = idx("Назначение");
-  const iAmt = idx("Сумма");
-  const iDt  = idx("Дата");
-  const iAcc = idx("Счёт");
-  const iPri = idx("Приоритет");
-
-  const priMap: Record<string, Priority> = {
-    "Высокий": "high", "Средний": "medium", "Низкий": "low",
-  };
-
-  return lines.slice(1).map((line, i) => {
-    const cols = splitCsvLine(line, sep).map(c => c.replace(/"/g, "").trim());
-    const get  = (n: number) => (n >= 0 ? cols[n] ?? "" : "");
-    const amtStr = get(iAmt).replace(/[₽\s ]/g, "").replace(",", ".");
-    return {
-      id:           idOffset + i + 1,
-      counterparty: get(iCp)  || "—",
-      article:      get(iArt) || "—",
-      purpose:      get(iPur) || "—",
-      amount:       parseFloat(amtStr) || 0,
-      date:         get(iDt)  || "01.07.2026",
-      account:      get(iAcc) || "Расчётный №1",
-      priority:     priMap[get(iPri)] ?? "medium",
-      status:       "draft" as Status,
-    };
-  }).filter(r => r.counterparty !== "—" || r.amount > 0);
-}
-
-/* ── ImportModal ─────────────────────────────────────── */
-interface ImportModalProps {
-  onClose:  () => void;
-  onImport: (rows: Request[]) => void;
-}
-
-function ImportModal({ onClose, onImport }: ImportModalProps) {
-  const [dragOver, setDragOver] = useState(false);
-  const [file,     setFile]     = useState<File | null>(null);
-  const [parsed,   setParsed]   = useState<Request[] | null>(null);
-  const [error,    setError]    = useState("");
-  const [idBase]                = useState(() => Date.now());
-
-  const readFile = (f: File) => {
-    setFile(f);
-    setParsed(null);
-    setError("");
-    const reader = new FileReader();
-    reader.onload = e => {
-      try {
-        const text = e.target?.result as string;
-        const rows = parseCsvToRequests(text, idBase);
-        if (rows.length === 0) {
-          setError("Не удалось распознать строки. Проверьте формат: заголовки должны совпадать с экспортом.");
-        } else {
-          setParsed(rows);
-        }
-      } catch {
-        setError("Ошибка чтения файла.");
-      }
-    };
-    reader.readAsText(f, "UTF-8");
-  };
-
-  const handleDrop = (e: DragEvent) => {
-    e.preventDefault(); setDragOver(false);
-    const f = e.dataTransfer.files[0];
-    if (f) readFile(f);
-  };
-
-  const handleInput = (e: ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0];
-    if (f) readFile(f);
-  };
-
-  return (
-    <div onClick={onClose}
-      style={{ position:"fixed", inset:0, background:C.overlay, display:"flex", alignItems:"center", justifyContent:"center", zIndex:1100, fontFamily:"Inter, sans-serif" }}>
-      <div onClick={e => e.stopPropagation()}
-        style={{ width: parsed ? 680 : 480, maxHeight:"88vh", background:C.surface, border:`1px solid ${C.warm}`, borderRadius:12, overflow:"hidden", boxShadow:"0 4px 24px rgba(44,44,30,0.18)", display:"flex", flexDirection:"column", transition:"width 0.2s" }}>
-
-        {/* Header */}
-        <div style={{ padding:"18px 24px 14px", display:"flex", alignItems:"center", justifyContent:"space-between", borderBottom:`1px solid ${C.warm}`, flexShrink:0 }}>
-          <div>
-            <h2 style={{ fontSize:16, fontWeight:600, color:C.textDk, margin:0 }}>Импорт из CSV</h2>
-            {!parsed && (
-              <p style={{ fontSize:11, color:C.textLt, margin:"4px 0 0" }}>
-                Ожидается файл в формате экспорта TrueMachine (разделитель — точка с запятой, кодировка UTF-8)
-              </p>
-            )}
-          </div>
-          <button onClick={onClose} style={{ background:"none", border:"none", cursor:"pointer", color:C.textLt, padding:4, display:"flex" }}><X size={18} /></button>
-        </div>
-
-        {/* Body */}
-        <div style={{ padding:"20px 24px", overflowY:"auto", flex:1 }}>
-          {/* Drop zone — always shown, smaller when preview is active */}
-          {!parsed && (
-            <div
-              onDragOver={e => { e.preventDefault(); setDragOver(true); }}
-              onDragLeave={() => setDragOver(false)}
-              onDrop={handleDrop}
-              onClick={() => document.getElementById("csv-input")?.click()}
-              style={{ border:`2px dashed ${dragOver ? C.sage : C.warm}`, borderRadius:8, padding:"32px 24px", display:"flex", flexDirection:"column", alignItems:"center", gap:10, background:dragOver ? C.sage10 : C.ivory, cursor:"pointer", transition:"all 0.15s" }}
-            >
-              <Upload size={28} color={dragOver ? C.sage : C.warm} />
-              <span style={{ fontSize:14, fontWeight:500, color:C.textDk }}>
-                {file ? file.name : "Перетащите .csv файл сюда"}
-              </span>
-              <span style={{ fontSize:12, color:C.textLt }}>
-                {file ? "Разбираю файл…" : "или нажмите для выбора · .csv"}
-              </span>
-            </div>
-          )}
-
-          {file && parsed && (
-            <div style={{ marginBottom:14 }}>
-              <div style={{ display:"flex", alignItems:"center", gap:10, padding:"8px 12px", background:C.sage10, borderRadius:6, border:`1px solid ${C.sage}`, marginBottom:12 }}>
-                <span style={{ fontSize:13, color:C.sage, fontWeight:600 }}>✓ {file.name}</span>
-                <span style={{ fontSize:12, color:C.textLt }}>распознано {parsed.length} заявок</span>
-                <button onClick={() => { setFile(null); setParsed(null); }}
-                  style={{ marginLeft:"auto", background:"none", border:`1px solid ${C.warm}`, borderRadius:4, padding:"2px 8px", fontSize:11, color:C.textLt, cursor:"pointer", fontFamily:"Inter, sans-serif" }}>
-                  Другой файл
-                </button>
-              </div>
-
-              {/* Preview table */}
-              <div style={{ border:`1px solid ${C.warm}`, borderRadius:8, overflow:"hidden", maxHeight:300, overflowY:"auto" }}>
-                <div style={{ display:"grid", gridTemplateColumns:"50px 1fr 110px 90px 90px 90px", background:C.hdr, position:"sticky", top:0 }}>
-                  {["№","Контрагент","Статья","Сумма","Дата","Счёт"].map(h => (
-                    <div key={h} style={{ padding:"8px 10px", fontSize:11, fontWeight:600, color:C.textDk }}>{h}</div>
-                  ))}
-                </div>
-                {parsed.map((r, i) => (
-                  <div key={r.id} style={{ display:"grid", gridTemplateColumns:"50px 1fr 110px 90px 90px 90px", background:i%2===0 ? C.surface : C.ivory50, borderBottom:`1px solid rgba(192,192,160,0.3)` }}>
-                    <div style={{ padding:"7px 10px", fontSize:12, color:C.textLt }}>{i+1}</div>
-                    <div style={{ padding:"7px 10px", fontSize:12, color:C.textDk, fontWeight:500, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{r.counterparty}</div>
-                    <div style={{ padding:"7px 10px", fontSize:12, color:C.textLt, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{r.article}</div>
-                    <div style={{ padding:"7px 10px", fontSize:12, color:C.textDk, fontVariantNumeric:"tabular-nums" }}>{ruFmt(r.amount)} ₽</div>
-                    <div style={{ padding:"7px 10px", fontSize:12, color:C.textLt }}>{r.date}</div>
-                    <div style={{ padding:"7px 10px", fontSize:12, color:C.textLt, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{r.account}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {error && (
-            <div style={{ padding:"12px 14px", background:"rgba(192,80,74,0.08)", border:`1px solid ${C.danger}`, borderRadius:6, fontSize:12, color:"#8B2020" }}>
-              {error}
-            </div>
-          )}
-        </div>
-
-        {/* Footer */}
-        <div style={{ borderTop:`1px solid ${C.warm}`, padding:"14px 24px", display:"flex", gap:10, flexShrink:0 }}>
-          <button
-            disabled={!parsed}
-            onClick={() => parsed && onImport(parsed)}
-            style={{ padding:"9px 20px", borderRadius:6, background:parsed ? C.sage : C.warm, color:C.surface, border:"none", fontSize:13, fontWeight:500, cursor:parsed ? "pointer" : "not-allowed", fontFamily:"Inter, sans-serif" }}>
-            Импортировать {parsed ? `(${parsed.length})` : ""}
-          </button>
-          <button onClick={onClose}
-            style={{ padding:"9px 14px", borderRadius:6, background:"transparent", color:C.olive, border:`1.5px solid ${C.warm}`, fontSize:13, cursor:"pointer", fontFamily:"Inter, sans-serif" }}>
-            Отмена
-          </button>
-          <input id="csv-input" type="file" accept=".csv" hidden onChange={handleInput} />
         </div>
       </div>
     </div>

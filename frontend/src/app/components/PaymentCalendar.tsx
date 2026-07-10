@@ -145,6 +145,7 @@ export function PaymentCalendar({ onCreateRequest, onSelectRequest, onGoToRegist
   const [mutableDays, setMutableDays] = useState<CalendarDay[]>([]);
   const [accounts, setAccounts] = useState<{key: AccKey; name: string}[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [apiDays, setApiDays] = useState<Map<string, CalendarDay>>(new Map());
   const today = `${TODAY_DATE.getFullYear()}-${String(TODAY_DATE.getMonth()+1).padStart(2,"0")}-${String(TODAY_DATE.getDate()).padStart(2,"0")}`;
 
@@ -174,6 +175,7 @@ export function PaymentCalendar({ onCreateRequest, onSelectRequest, onGoToRegist
 
   const fetchData = (start: string, end: string, itemId?: string, cpId?: string, incStatus?: string) => {
     setLoading(true);
+    setLoadError(null);
     const params: any = { start_date: start, end_date: end };
     if (itemId) params.item_id = itemId;
     if (cpId) params.counterparty_id = cpId;
@@ -212,7 +214,11 @@ export function PaymentCalendar({ onCreateRequest, onSelectRequest, onGoToRegist
         });
         setApiDays(map);
       })
-      .catch((err) => { console.error("[Calendar] API error:", err); })
+      .catch((err) => {
+        console.error("[Calendar] API error:", err);
+        const msg = err?.response?.data?.message || err?.message || "Не удалось загрузить данные календаря";
+        setLoadError(msg);
+      })
       .finally(() => setLoading(false));
   };
 
@@ -307,7 +313,7 @@ export function PaymentCalendar({ onCreateRequest, onSelectRequest, onGoToRegist
   }, [getDayDataLocal]);
 
   const [period,       setPeriod]       = useState<Period>("week");
-  const [dayOffset,    setDayOffset]    = useState(0);
+  const [dayOffset,    setDayOffset]    = useState(dateToOffset(new Date()));
   const [pageIndex,    setPageIndex]    = useState(0);
   const [dense,        setDense]        = useState(false);
   const [tooltip,      setTooltip]      = useState<TooltipState | null>(null);
@@ -555,7 +561,7 @@ export function PaymentCalendar({ onCreateRequest, onSelectRequest, onGoToRegist
             <ChevronRight size={16} />
           </button>
 
-          {(period !== "custom" && dayOffset !== 0) && (
+          {(period !== "custom" && dayOffset !== dateToOffset(TODAY_DATE)) && (
             <button onClick={goToday}
               style={{ padding:"4px 10px", borderRadius:6, border:`1px solid ${C.sage}`, background:C.sage10, color:C.sage, fontSize:12, cursor:"pointer", fontFamily:"Inter, sans-serif", marginLeft:2 }}>
               Сегодня
@@ -804,6 +810,24 @@ export function PaymentCalendar({ onCreateRequest, onSelectRequest, onGoToRegist
       {loading ? (
         <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: C.textLt, fontSize: 14 }}>
           Загрузка данных календаря…
+        </div>
+      ) : loadError ? (
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 12, color: C.textLt, fontSize: 14 }}>
+          <span style={{ color: C.danger, fontSize: 13 }}>{loadError}</span>
+          <button onClick={() => {
+            const anchorISO = toISO(offsetToDate(dayOffset));
+            const fromRu = parseDate(customFrom);
+            const toRu = parseDate(customTo);
+            let start: string, end: string;
+            if (period === "week") { start = anchorISO; end = addDays(anchorISO, 6); }
+            else if (period === "month") { const d = new Date(anchorISO + "T12:00:00"); start = toISO(new Date(d.getFullYear(), d.getMonth(), 1)); end = toISO(new Date(d.getFullYear(), d.getMonth() + 1, 0)); }
+            else if (period === "quarter") { const d = new Date(anchorISO + "T12:00:00"); const qm = Math.floor(d.getMonth() / 3) * 3; start = toISO(new Date(d.getFullYear(), qm, 1)); end = toISO(new Date(d.getFullYear(), qm + 3, 0)); }
+            else { start = fromRu ? toISO(fromRu) : anchorISO; end = toRu ? toISO(toRu) : addDays(anchorISO, 6); }
+            fetchData(start, end, articleFilter || undefined, counterpartyFilter || undefined, incomeStatusFilter || undefined);
+          }}
+            style={{ padding: "7px 16px", borderRadius: 6, background: C.sage, color: C.surface, border: "none", fontSize: 13, fontWeight: 500, cursor: "pointer", fontFamily: "Inter, sans-serif" }}>
+            Повторить
+          </button>
         </div>
       ) : useGrid ? (
         /* ════ MONTH / QUARTER GRID VIEW ════ */

@@ -37,7 +37,7 @@ class CalendarController extends Controller
 
         // Обычные платежи (не recurring)
         $regularPayments = Payment::where('recurring', false)
-            ->whereIn('status', ['pending', 'approved', 'in_registry', 'paid'])
+            ->whereIn('status', ['draft', 'pending', 'approved', 'in_registry', 'paid'])
             ->where('planned_date', '<=', $endStr)
             ->with('counterparty')
             ->get();
