@@ -1,58 +1,168 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# Платёжный календарь — Backend
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+Laravel-бэкенд для платёжного календаря. Обеспечивает REST API для фронтенда, управление данными, аутентификацию и бизнес-логику.
 
-## About Laravel
-
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
-
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
-
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
-
-## Learning Laravel
-
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
-
-In addition, [Laracasts](https://laracasts.com) contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
-
-You can also watch bite-sized lessons with real-world projects on [Laravel Learn](https://laravel.com/learn), where you will be guided through building a Laravel application from scratch while learning PHP fundamentals.
-
-## Agentic Development
-
-Laravel's predictable structure and conventions make it ideal for AI coding agents like Claude Code, Cursor, and GitHub Copilot. Install [Laravel Boost](https://laravel.com/docs/ai) to supercharge your AI workflow:
+## Запуск
 
 ```bash
-composer require laravel/boost --dev
-
-php artisan boost:install
+docker compose up -d backend
 ```
 
-Boost provides your agent 15+ tools and skills that help agents build Laravel applications while following best practices.
+Контейнер сам поставит зависимости через composer, создаст `.env` из `.env.example`, сгенерирует `APP_KEY`, прогонит миграции и поднимет сервер на http://localhost:8000. Повторный запуск идемпотентен — шаги пропускаются, если уже выполнены.
 
-## Contributing
+API доступен по адресу `http://localhost:8000/api`.
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+## Запуск локально (без Docker)
 
-## Code of Conduct
+```bash
+composer install
+cp .env.example .env
+php artisan key:generate
+php artisan migrate --seed
+php artisan serve
+```
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+В `.env` настроить подключение к PostgreSQL:
 
-## Security Vulnerabilities
+```
+DB_CONNECTION=pgsql
+DB_HOST=localhost
+DB_PORT=5432
+DB_DATABASE=payment_calendar
+DB_USERNAME=postgres
+DB_PASSWORD=postgres
+```
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+## Тесты
 
-## License
+```bash
+docker exec -w /var/www/html payment_backend php artisan test
+```
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+Используется sqlite в памяти (настроено в `phpunit.xml`), реальная база для разработки не трогается.
+
+## Интеграция с фронтендом
+
+CORS настроен в `config/cors.php`. Фронтенд на порту `5173` может обращаться к `http://localhost:8000/api` без дополнительной настройки.
+
+Аутентификация через Laravel Sanctum (Bearer token). При логине (`POST /api/login`) сервер возвращает `token` — он нужен в заголовке `Authorization: Bearer <token>` для всех остальных запросов.
+
+## Памятка: что может пользователь
+
+В системе четыре роли, каждая видит и может делать своё.
+
+**Инициатор** — роль по умолчанию:
+- создаёт заявки на платёж и плановые поступления;
+- просматривает календарь, заявки, поступления, справочники;
+- не может согласовывать, формировать реестр или управлять справочниками.
+
+**Казначей**:
+- всё то же, что инициатор, плюс:
+- ведёт календарь, переносит платежи на другие даты;
+- формирует реестр из согласованных заявок;
+- отмечает заявки как оплаченные;
+- выгружает реестр и отчёты в файл.
+
+**Руководитель**:
+- согласовывает или отклоняет заявки с комментарием;
+- утверждает реестр;
+- просматривает отчёты по ликвидности.
+
+**Администратор**:
+- всё то же, что казначей и руководитель, плюс;
+- управляет справочниками: счета, контрагенты, статьи, валюты, пользователи;
+- просматривает журнал аудита.
+
+## API эндпоинты
+
+### Авторизация
+
+- `POST /api/login` — вход, возвращает `{token, user}`;
+- `POST /api/logout` — выход, удаляет токен;
+- `GET /api/me` — текущий пользователь.
+
+### Справочники (CRUD)
+
+- `GET/POST /api/accounts` — счета и кассы;
+- `GET/POST /api/counterparties` — контрагенты;
+- `GET/POST /api/items` — статьи движения;
+- `GET/POST /api/users` — пользователи (только администратор).
+
+### Заявки на платёж
+
+- `GET /api/payments` — список (фильтры: status, account_id, counterparty_id, date_from, date_to);
+- `POST /api/payments` — создание (amount, planned_date, account_id, counterparty_id, item_id, priority);
+- `PUT /api/payments/{id}` — изменение (только черновики);
+- `DELETE /api/payments/{id}` — удаление (только черновики);
+- `POST /api/payments/{id}/submit` — отправить на согласование;
+- `POST /api/payments/{id}/approve` — согласовать (руководитель, администратор);
+- `POST /api/payments/{id}/reject` — отклонить (руководитель, администратор);
+- `POST /api/payments/{id}/move` — перенести дату.
+
+### Поступления
+
+- `GET /api/incomes` — список;
+- `POST /api/incomes` — создание;
+- `PUT /api/incomes/{id}` — изменение;
+- `DELETE /api/incomes/{id}` — удаление;
+- `POST /api/incomes/{id}/confirmed` — подтвердить;
+- `POST /api/incomes/{id}/received` — отметить полученным.
+
+### Календарь
+
+- `GET /api/calendar?start_date=...&end_date=...&account_id=...` — данные по дням с остатками.
+
+### Реестры
+
+- `GET /api/registries` — список;
+- `POST /api/registries` — создание (registry_date, payment_ids);
+- `GET /api/registries/{id}` — детали;
+- `POST /api/registries/{id}/pay` — оплатить;
+- `GET /api/registries/{id}/export` — экспорт в CSV.
+
+### Отчёты
+
+- `GET /api/reports/balances` — остатки по счетам;
+- `GET /api/reports/cash-gaps` — кассовые разрывы;
+- `GET /api/reports/plan-fact` — план и факт.
+
+### Аудит
+
+- `GET /api/audit` — журнал действий (только администратор).
+
+## Модель данных
+
+| Таблица | Описание | Ключевые поля |
+|---|---|---|
+| `users` | Пользователи | name, email, password, role |
+| `accounts` | Счета | name, type (bank/cash), currency, initial_balance |
+| `counterparties` | Контрагенты | name, inn, details |
+| `items` | Статьи движения | name, type (income/payment) |
+| `payments` | Заявки | amount, planned_date, account_id, counterparty_id, item_id, priority, status |
+| `incomes` | Поступления | amount, planned_date, account_id, counterparty_id, item_id, status |
+| `registries` | Реестры | registry_date, status, created_by, approved_by |
+| `approvals` | Согласования | payment_id, user_id, decision, comment |
+| `audit_logs` | Аудит | user_id, action, entity, details |
+
+## Статусы
+
+**Заявки:** `draft` → `pending` → `approved` → `in_registry` → `paid` (ветвление: `pending` → `rejected`)
+
+**Поступления:** `planned` → `confirmed` → `received`
+
+**Реестры:** `created` → `paid` → `canceled`
+
+## Хранение денег
+
+Все суммы хранятся в копейках (целое число). Фронтенд конвертирует в рубли только при отображении. При отправке на бэкенд — обратно в копейки.
+
+## Команды artisan
+
+```bash
+php artisan migrate          # Выполнить миграции
+php artisan migrate:fresh    # Пересоздать базу
+php artisan db:seed          # Заполнить начальными данными
+php artisan serve            # Запустить dev-сервер
+php artisan key:generate     # Сгенерировать APP_KEY
+php artisan test             # Запустить тесты
+```

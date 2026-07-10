@@ -9,6 +9,8 @@ class ItemSeeder extends Seeder
 {
     public function run()
     {
+        if (Item::count() > 0) return;
+
         // Поступления
         Item::create(['code' => '02.01', 'name' => 'Выручка от клиентов', 'type' => 'income', 'group' => 'Основная деятельность']);
         Item::create(['code' => '02.02', 'name' => 'Прочие доходы',       'type' => 'income', 'group' => 'Прочие']);

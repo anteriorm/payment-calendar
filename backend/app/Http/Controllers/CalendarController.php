@@ -19,6 +19,7 @@ class CalendarController extends Controller
             'item_id' => 'nullable|exists:items,id',
             'counterparty_id' => 'nullable|exists:counterparties,id',
             'income_status' => 'nullable|in:planned,confirmed,received',
+            'status' => 'nullable|in:pending,approved,in_registry,paid',
         ]);
 
         $start = Carbon::parse($request->start_date)->startOfDay();
@@ -35,9 +36,14 @@ class CalendarController extends Controller
 
         $endStr = $end->toDateString();
 
-        // Обычные платежи (не recurring)
+        // Обычные платежи (не recurring) — draft НЕ включаем, т.к. не утверждённые
+        // заявки не должны влиять на фактический остаток
+        $paymentStatuses = $request->filled('status')
+            ? [$request->status]
+            : ['pending', 'approved', 'in_registry', 'paid'];
+
         $regularPayments = Payment::where('recurring', false)
-            ->whereIn('status', ['draft', 'pending', 'approved', 'in_registry', 'paid'])
+            ->whereIn('status', $paymentStatuses)
             ->where('planned_date', '<=', $endStr)
             ->with('counterparty')
             ->get();

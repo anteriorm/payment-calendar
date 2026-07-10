@@ -10,6 +10,8 @@ class UserSeeder extends Seeder
 {
     public function run()
     {
+        if (User::count() > 0) return;
+
         User::create([
             'name' => 'Сидоров Андрей К.',
             'email' => 'admin@truemachine.ru',

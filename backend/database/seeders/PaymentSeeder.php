@@ -14,6 +14,8 @@ class PaymentSeeder extends Seeder
 {
     public function run()
     {
+        if (Payment::count() > 0) return;
+
         $accounts = Account::all();
         $counterparties = Counterparty::all();
         $paymentItems = Item::where('type', 'payment')->get();

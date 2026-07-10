@@ -1,15 +1,28 @@
-version: '3.8'
-
 services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: payment_postgres
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_DB=payment_calendar
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d payment_calendar"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
     container_name: payment_backend
     ports:
-      - "8000:8000"
-    volumes:
-      - ./backend:/var/www/html
+      - "8000:80"
     environment:
       - APP_ENV=local
       - APP_DEBUG=true
@@ -23,8 +36,10 @@ services:
       - FRONTEND_URL=http://localhost:5173
       - SANCTUM_STATEFUL_DOMAINS=localhost:5173,localhost,127.0.0.1
       - TZ=Europe/Moscow
+      - SESSION_DRIVER=database
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
 
   frontend:
     build:
@@ -35,22 +50,10 @@ services:
       - "5173:5173"
     environment:
       - VITE_API_URL=/api
-      - VITE_PROXY_TARGET=http://backend:8000
+      - VITE_PROXY_TARGET=http://backend:80
       - VITE_USE_MOCK=false
     depends_on:
       - backend
-
-  postgres:
-    image: postgres:16-alpine
-    container_name: payment_postgres
-    ports:
-      - "5432:5432"
-    environment:
-      - POSTGRES_DB=payment_calendar
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
 
 volumes:
   postgres_data:

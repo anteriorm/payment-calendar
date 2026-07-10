@@ -173,13 +173,14 @@ export function PaymentCalendar({ onCreateRequest, onSelectRequest, onGoToRegist
       .catch(() => {});
   }, []);
 
-  const fetchData = (start: string, end: string, itemId?: string, cpId?: string, incStatus?: string) => {
+  const fetchData = (start: string, end: string, itemId?: string, cpId?: string, incStatus?: string, statusFilter?: string) => {
     setLoading(true);
     setLoadError(null);
     const params: any = { start_date: start, end_date: end };
     if (itemId) params.item_id = itemId;
     if (cpId) params.counterparty_id = cpId;
     if (incStatus) params.income_status = incStatus;
+    if (statusFilter) params.status = statusFilter;
     api.calendar.get(params)
       .then(data => {
         const map = new Map<string, CalendarDay>();
@@ -211,6 +212,16 @@ export function PaymentCalendar({ onCreateRequest, onSelectRequest, onGoToRegist
             if (row.description && !existing.description) existing.description = row.description;
             map.set(row.date, existing);
           }
+        });
+
+        // Всегда пересчитываем итого из данных по счетам — гарантирует актуальность
+        map.forEach((day) => {
+          const acc1 = day.acc1, acc2 = day.acc2, cash = day.cash;
+          const totalIncome  = acc1.income  + acc2.income  + cash.income;
+          const totalExpense = acc1.expense + acc2.expense + cash.expense;
+          const totalBalance = acc1.balance + acc2.balance + cash.balance;
+          day.total = { income: totalIncome, expense: totalExpense, balance: totalBalance };
+          day.state = totalBalance < 0 ? "cashgap" : totalBalance === 0 ? "zero" : "positive";
         });
         setApiDays(map);
       })
@@ -346,8 +357,8 @@ export function PaymentCalendar({ onCreateRequest, onSelectRequest, onGoToRegist
     else if (period === "month") { const d = new Date(anchorISO + "T12:00:00"); start = toISO(new Date(d.getFullYear(), d.getMonth(), 1)); end = toISO(new Date(d.getFullYear(), d.getMonth() + 1, 0)); }
     else if (period === "quarter") { const d = new Date(anchorISO + "T12:00:00"); const qm = Math.floor(d.getMonth() / 3) * 3; start = toISO(new Date(d.getFullYear(), qm, 1)); end = toISO(new Date(d.getFullYear(), qm + 3, 0)); }
     else { start = fromRu ? toISO(fromRu) : anchorISO; end = toRu ? toISO(toRu) : addDays(anchorISO, 6); }
-    fetchData(start, end, articleFilter || undefined, counterpartyFilter || undefined, incomeStatusFilter || undefined);
-  }, [period, dayOffset, customFrom, customTo, articleFilter, counterpartyFilter, incomeStatusFilter, refreshKey]);
+    fetchData(start, end, articleFilter || undefined, counterpartyFilter || undefined, incomeStatusFilter || undefined, statusFilter || undefined);
+  }, [period, dayOffset, customFrom, customTo, articleFilter, counterpartyFilter, incomeStatusFilter, statusFilter, refreshKey]);
 
   /* ── Derived display state ── */
   const anchor        = offsetToDate(dayOffset);
@@ -823,7 +834,7 @@ export function PaymentCalendar({ onCreateRequest, onSelectRequest, onGoToRegist
             else if (period === "month") { const d = new Date(anchorISO + "T12:00:00"); start = toISO(new Date(d.getFullYear(), d.getMonth(), 1)); end = toISO(new Date(d.getFullYear(), d.getMonth() + 1, 0)); }
             else if (period === "quarter") { const d = new Date(anchorISO + "T12:00:00"); const qm = Math.floor(d.getMonth() / 3) * 3; start = toISO(new Date(d.getFullYear(), qm, 1)); end = toISO(new Date(d.getFullYear(), qm + 3, 0)); }
             else { start = fromRu ? toISO(fromRu) : anchorISO; end = toRu ? toISO(toRu) : addDays(anchorISO, 6); }
-            fetchData(start, end, articleFilter || undefined, counterpartyFilter || undefined, incomeStatusFilter || undefined);
+            fetchData(start, end, articleFilter || undefined, counterpartyFilter || undefined, incomeStatusFilter || undefined, statusFilter || undefined);
           }}
             style={{ padding: "7px 16px", borderRadius: 6, background: C.sage, color: C.surface, border: "none", fontSize: 13, fontWeight: 500, cursor: "pointer", fontFamily: "Inter, sans-serif" }}>
             Повторить

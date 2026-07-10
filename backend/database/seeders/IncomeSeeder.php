@@ -14,6 +14,8 @@ class IncomeSeeder extends Seeder
 {
     public function run()
     {
+        if (Income::count() > 0) return;
+
         $accounts = Account::all();
         $counterparties = Counterparty::all();
         $incomeItems = Item::where('type', 'income')->get();

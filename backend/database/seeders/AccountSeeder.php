@@ -9,6 +9,8 @@ class AccountSeeder extends Seeder
 {
     public function run()
     {
+        if (Account::count() > 0) return;
+
         Account::create([
             'name' => 'Расчётный счёт №1',
             'type' => 'bank',

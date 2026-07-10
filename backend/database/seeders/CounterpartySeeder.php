@@ -9,6 +9,8 @@ class CounterpartySeeder extends Seeder
 {
     public function run()
     {
+        if (DB::table('counterparties')->count() > 0) return;
+
         DB::table('counterparties')->insert([
             [
                 'name' => 'ООО Поставщик Альфа',

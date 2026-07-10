@@ -11,6 +11,8 @@ class AuditSeeder extends Seeder
 {
     public function run()
     {
+        if (AuditLog::count() > 0) return;
+
         $users = User::all();
         if ($users->isEmpty()) return;
 
